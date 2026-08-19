@@ -311,7 +311,14 @@ export abstract class SequoiaAdapter {
 		})
 	}
 
-	/** Table 1.3.1.8. Lists saved custom preset filenames. Response shown only as Figure 1.3.1.7. */
+	/**
+	 * Table 1.3.1.8. Lists saved custom preset filenames. Response shown only as Figure 1.3.1.7.
+	 *
+	 * A 4K60L with no presets saved returned `[]` (2026-08-19), which settles the container: this is
+	 * a JSON array, and an empty one is an ordinary successful read rather than an error or an empty
+	 * body. The shape of a populated element - bare string or object - is still unrecorded, so
+	 * nothing downstream may assume it yet.
+	 */
 	async listCustomPresets(): Promise<AvitechResponse> {
 		return this.api.sendCommand('2060', { func: 'list', type: 'custom_preset', port: SYSTEM_COMMAND_PORT })
 	}

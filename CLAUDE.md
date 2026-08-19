@@ -213,10 +213,17 @@ mode-specific rather than a blanket doubt about §1.3.2, and it is now the stron
   exactly the kind this project has already seen fail. Port 5 (4K60-only, §1.3.1.4) is unexercised.
 - **The 4K60L's other two modes.** Single-View Seamless has never been on a bench at all.
   Daisy chain has, with the negative results above.
-- **Custom Preset File List (§1.3.1.8) response shape.** The one `get` still unrecorded: the guide
-  shows it only as a screenshot, and unlike Firmware Version, Network and OSD Info, its figure has
-  not been decoded. Those three were recovered as images (`pdfimages -png -f <page>`) rather than
-  from hardware — see below. **Signal Type (§1.3.1.2) is captured from hardware and implemented.**
+- **Custom Preset File List (§1.3.1.8) element shape.** The container is settled — hardware
+  returned `[]` from a 4K60L with no presets saved (2026-08-19), so the response is a **JSON array**
+  rather than an object envelope, and "no presets" is an ordinary empty array rather than `""`,
+  `"Success"` or a `cb_status` rejection. `parseResponse` already handles that correctly: the
+  `cb_status` check is guarded by `!Array.isArray(parsed)`, so an array falls straight through.
+  What is still unknown is **what one element looks like** — a bare filename string, or an object
+  with a name key. That is the part a preset dropdown would need, so capturing it means saving a
+  preset from the unit's own GUI and re-running the card. The guide shows only Figure 1.3.1.7.
+- Firmware Version, Network and OSD Info were recovered from the guide's figures as images
+  (`pdfimages -png -f <page>`) rather than from hardware — see below. **Signal Type (§1.3.1.2) is
+  captured from hardware and implemented.**
 
 Four places where the guide's prose and its worked example disagree, and the example was followed:
 `en` vs `enable` (§1.3.1.15), `mode` vs `sob_alarm` (§1.3.1.22), `preset_num` vs `preset_unm`
