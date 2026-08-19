@@ -275,5 +275,12 @@ Anything else that parses as JSON is returned parsed; anything that doesn't is r
   onto those — so the parsing stays usable by anything else that needs live input state.
 - Actions, feedbacks, presets, and variables are each registered from their own module via an
   `Update*(self)` function called from `ModuleInstance`. Keep that shape; `actions.ts` is by far
-  the largest file and is where mode-dependent option lists are built. `presets.ts` is still the
-  untouched skeleton stub (`mylabel` / "Section One") — the only one left.
+  the largest file and is where mode-dependent option lists are built.
+- **`presets.ts` is gated by mode for the same reason `actions.ts` is.** A preset may only reference
+  an action id that exists in the configured mode, or applying it binds a step to an action the
+  module never registered — so its mode predicates mirror `UpdateActions()` exactly, and
+  `updatePresets()` is called from `configUpdated()` as well as `init()`. Adding a mode therefore
+  means checking three places, not one: `DEVICE_MODES`/`DEVICE_MODE_CHOICES`, the `actions.ts`
+  gating, and here. In daisy-chain mode the preset list is Audio and K/M Control only.
+  Variable references in preset text use the `sequoia:` prefix — the manifest `shortname`, which
+  Companion rewrites to the user's connection label when the preset is applied.
