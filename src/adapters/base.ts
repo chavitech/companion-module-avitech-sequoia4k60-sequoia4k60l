@@ -416,7 +416,12 @@ export abstract class SequoiaAdapter {
 	 * Unlike `setWindowGeometry`, this does not read current state first. It does not have to: every
 	 * worked example in these six tables sends a partial `data` object and the unaddressed keys are
 	 * left alone, so there is no all-or-nothing payload to reconstruct and nothing to accidentally
-	 * reset. If that turns out to be false on hardware, `getOsdInfo` is the read side to build on.
+	 * reset.
+	 *
+	 * **Confirmed additive** on a 4K60L in quad-bypass mode, 2026-08-19: writing one task's keys
+	 * leaves the others as they were. This was the module's largest untested assumption, because
+	 * `setWindowGeometry` had to abandon exactly the same one. `getOsdInfo` remains the read side if
+	 * a future firmware changes it.
 	 */
 	async setOsd(data: Partial<OsdSettings>): Promise<void> {
 		await this.api.sendCommand('2060', { func: 'set', type: 'osd', data })
@@ -452,9 +457,12 @@ export abstract class SequoiaAdapter {
 	 * Table 1.3.1.24. Idle time in seconds after which the keyboard/mouse locks automatically.
 	 *
 	 * The guide's Cmd-Value row for `idle_time` is **blank** - it documents no range, no units and no
-	 * disable value. Seconds is inferred from the single example, which sends 120 and describes it as
-	 * "2 minutes"; that is the only fact available. Whether 0 disables the lock is unknown and
-	 * untested, so the action does not claim it does.
+	 * disable value. Seconds was inferred from the single example, which sends 120 and describes it
+	 * as "2 minutes", and that inference is **confirmed** on a 4K60L in quad-bypass mode, 2026-08-19.
+	 *
+	 * Still unknown: whether 0 disables the lock, and where the real upper bound is. The 0-65535
+	 * range in `actions.ts` is this module's invention, not a vendor-stated limit, so the action
+	 * still does not claim 0 means "never".
 	 */
 	async setKmIdleDetection(idleTime: number): Promise<void> {
 		await this.api.sendCommand('Info', { func: 'lock', type: 'km', idle_time: idleTime })

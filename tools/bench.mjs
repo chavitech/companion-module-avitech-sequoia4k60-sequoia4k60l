@@ -561,7 +561,7 @@ const COMMANDS = [
 		id: 'set_km_idle_detection',
 		section: '1.3.1.24',
 		name: 'Keyboard/Mouse Idle Detection — Set',
-		note: 'The guide documents no range at all for idle_time. Seconds is inferred from its one example (120 = "2 minutes"). Whether 0 disables the lock is unknown — a good thing to establish here.',
+		note: 'The guide documents no range at all for idle_time. Seconds was inferred from its one example (120 = "2 minutes") and is confirmed on a 4K60L in quad-bypass. Whether 0 disables the lock is still unknown — a good thing to establish here.',
 		fields: [{ id: 'idle_time', label: 'Idle Time (seconds)', type: 'number', default: 120 }],
 		run: (values) => adapter.setKmIdleDetection(values.idle_time),
 	},

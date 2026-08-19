@@ -489,8 +489,11 @@ export function UpdateActions(self: ModuleInstance): void {
 
 	// --- Section 1.3.2, Commands for Controlling Window ---------------------------------------
 	// Documented for both models with one request shape, so these are plain `self.adapter` calls
-	// with no `instanceof` narrowing. Section 1.3.5 lists none of them, so daisy-chain mode is
-	// assumed not to accept them and they are left unregistered there.
+	// with no `instanceof` narrowing. Section 1.3.5 lists none of them, and hardware agrees: on a
+	// daisy-chained 4K60L almost every one returns `Success` and does nothing (2026-07-29), while
+	// the same seven work correctly on the same model in quad-bypass (2026-08-19). So the
+	// restriction is specific to daisy chain rather than a general doubt about 1.3.2, and they are
+	// left unregistered there.
 	const supportsWindowCommands = !isDaisyChain
 
 	const get_window_geometry: CompanionActionDefinition<ActionsSchema['get_window_geometry']['options']> | undefined =
