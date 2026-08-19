@@ -314,10 +314,14 @@ export abstract class SequoiaAdapter {
 	/**
 	 * Table 1.3.1.8. Lists saved custom preset filenames. Response shown only as Figure 1.3.1.7.
 	 *
-	 * A 4K60L with no presets saved returned `[]` (2026-08-19), which settles the container: this is
-	 * a JSON array, and an empty one is an ordinary successful read rather than an error or an empty
-	 * body. The shape of a populated element - bare string or object - is still unrecorded, so
-	 * nothing downstream may assume it yet.
+	 * Captured from a 4K60L on 2026-08-19: `[]` with nothing saved, then `["TestPreset"]`, then
+	 * `["TestPreset2","TestPreset"]`. So this is a JSON array of **bare filename strings** with no
+	 * extension and no wrapping object, and an empty list is an ordinary successful read rather than
+	 * an error. A name from here feeds `loadCustomPreset()` and `deleteCustomPreset()` unchanged.
+	 *
+	 * The ordering is **not** settled. It is not ascending alphabetical, but the capture cannot tell
+	 * newest-first from descending alphabetical - the newer file was also the later string. Nothing
+	 * may assume element 0 is the most recent preset.
 	 */
 	async listCustomPresets(): Promise<AvitechResponse> {
 		return this.api.sendCommand('2060', { func: 'list', type: 'custom_preset', port: SYSTEM_COMMAND_PORT })
