@@ -8,6 +8,7 @@ import { UpdatePresets } from './presets.js'
 import { AvitechHttpApi } from './avitech-api.js'
 import { createAdapter, type SequoiaAdapter } from './adapters/index.js'
 import { emptySignals, parseSignalResponse, type InputSignal } from './signal.js'
+import { parseCustomPresetList } from './system.js'
 
 export type ModuleSchema = {
 	config: ModuleConfig
@@ -32,6 +33,17 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	/** Set once a poll has failed, so a device going away logs once instead of every interval. */
 	private pollFailing = false
 
+	/**
+	 * Custom preset filenames from the device (Table 1.3.1.8), newest first, feeding the Load and
+	 * Delete pickers in `actions.ts`.
+	 *
+	 * Unlike the signal state this is *not* polled. Presets only change when someone saves or
+	 * deletes one, so it is read at init and on demand via the "Refresh Custom Preset List" action.
+	 * Empty is a legitimate value - a unit with nothing saved returns `[]` - so it is not a
+	 * "not loaded yet" marker, which is why both pickers stay usable when it is empty.
+	 */
+	customPresets: string[] = []
+
 	constructor(internal: unknown) {
 		super(internal)
 	}
@@ -48,6 +60,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.publishSignalState() // seed the variables so they read "No signal" rather than being undefined
 
 		await this.checkConnection()
+		await this.refreshCustomPresets()
 		this.startPolling()
 	}
 	// When module gets deleted
@@ -64,7 +77,32 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.updatePresets() // presets reference actions, so they are gated by mode for the same reason
 
 		await this.checkConnection()
+		await this.refreshCustomPresets() // a new host is a different unit with different presets
 		this.startPolling()
+	}
+
+	/**
+	 * Reads the custom preset list and rebuilds the actions so the Load and Delete pickers show it.
+	 *
+	 * Never throws. This runs during `init()`, where an unreachable device must still leave a
+	 * working instance - the pickers simply fall back to typed names, which is what they were
+	 * before they had a list at all. `checkConnection()` has already reported the connection state,
+	 * so a failure here is logged at `debug` rather than raised again as an error.
+	 *
+	 * Not run in daisy-chain mode: section 1.3.5 does not list this command, and `actions.ts` does
+	 * not register the preset actions there, so there is nothing to populate.
+	 */
+	async refreshCustomPresets(): Promise<void> {
+		if (!this.config.host || this.config.mode === 'sequoia-4k60l-daisy-chain') {
+			return
+		}
+
+		try {
+			this.customPresets = parseCustomPresetList(await this.adapter.listCustomPresets())
+			this.updateActions() // the pickers' choices are baked in at definition time
+		} catch (error) {
+			this.log('debug', `Could not read the custom preset list: ${(error as Error).message}`)
+		}
 	}
 
 	/** Latest known state for one input, or undefined if `input` is not one of the four. */

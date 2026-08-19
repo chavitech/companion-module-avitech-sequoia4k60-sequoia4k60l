@@ -1,5 +1,6 @@
 import { splitRgb } from '@companion-module/base'
 import type { DropdownChoice } from '@companion-module/base'
+import type { AvitechResponse } from './avitech-api.js'
 import type { DeviceColor } from './adapters/index.js'
 
 /**
@@ -152,4 +153,51 @@ export function toTransparencyColor(value: ColorOptionValue): DeviceColor {
 	const { r, g, b, a } = splitRgb(value)
 
 	return [r, g, b, Math.round((a ?? 1) * 255)]
+}
+
+/**
+ * Normalises a "Custom Preset File List - Get" response (Table 1.3.1.8) into preset filenames.
+ *
+ * Captured from a 4K60L on 2026-08-19 across four reads, saving a preset between each:
+ *
+ * ```
+ * []                                    nothing saved
+ * ["TestPreset"]
+ * ["TestPreset2","TestPreset"]
+ * ["Alpha","TestPreset2","TestPreset"]  Alpha saved last, returned first
+ * ```
+ *
+ * Three facts that this relies on, all from that capture rather than from the guide - which shows
+ * the response only as Figure 1.3.1.7:
+ *
+ * - **Elements are bare filename strings**, with no extension and no wrapping object. So a name
+ *   from here is exactly what `loadCustomPreset()` and `deleteCustomPreset()` take, with no
+ *   transformation in between. That is what makes a picker possible at all.
+ * - **An empty list is an ordinary `[]`**, not `""` or `"Success"`, so "no presets saved" is a
+ *   successful read and not an error.
+ * - **The order is newest-first.** `Alpha` was saved last and came back first, which is what rules
+ *   out descending-alphabetical - the earlier reads could not, because `TestPreset2` happened to be
+ *   both the newer file and the later string. The order is preserved rather than sorted here, so
+ *   the most recently saved preset stays at the top of the picker where it is most likely wanted.
+ *
+ * Anything that is not a non-empty string is dropped rather than throwing: this feeds a dropdown
+ * rebuild, and one odd entry should not cost the user the rest of the list.
+ */
+export function parseCustomPresetList(response: AvitechResponse): string[] {
+	if (!Array.isArray(response)) {
+		return []
+	}
+
+	return response.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+}
+
+/**
+ * The preset picker's choices, in the device's own newest-first order.
+ *
+ * Returns an empty list when nothing is saved. Callers pair this with `allowCustom` so the field
+ * still accepts a typed name - a dropdown with no entries and no way to type into it would be a
+ * dead control on a unit whose presets have not been listed yet.
+ */
+export function CustomPresetChoices(names: string[]): DropdownChoice[] {
+	return names.map((name) => ({ id: name, label: name }))
 }
