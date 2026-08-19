@@ -243,10 +243,60 @@ function parseColor(value, fallbackAlpha = 255) {
 	return [parts[0], parts[1], parts[2], parts.length === 4 ? parts[3] : fallbackAlpha]
 }
 
+// --- Applicability --------------------------------------------------------------------------
+
+const MODEL_LABELS = {
+	'sequoia-4k60': 'Sequoia 4K60',
+	'sequoia-4k60l': 'Sequoia 4K60L',
+}
+
+const SECTION_TITLES = {
+	'1.3.1': 'Commands for Controlling System',
+	'1.3.2': 'Commands for Controlling Window',
+	'1.3.3': 'Commands for Sequoia 4K60',
+	'1.3.4': 'Commands for Sequoia 4K60L',
+	'1.3.5': 'Command for Sequoia 4K60L in Daisy Chain',
+}
+
+/** '1.3.4.7-8' -> '1.3.4'. Used to group the page and to look up a section title. */
+function sectionGroup(section) {
+	return section.split('.').slice(0, 3).join('.')
+}
+
 /**
- * Declarative so that extending the bench to another guide section (or to the already-implemented
- * 1.3.3 - 1.3.5 commands) is a data change rather than a rewrite. `run` receives the form values
- * keyed by field id and calls straight through to the adapter.
+ * Why a command cannot be fired in the current run, or undefined if it can.
+ *
+ * Sections 1.3.3 - 1.3.5 are the first commands here that do not exist on every unit, and two of
+ * them (`setKmRebootMode`, `setLabel`) are methods only `Sequoia4K60LAdapter` declares - calling
+ * one through a 4K60 adapter is a TypeError, not a device error, which would look like a bench
+ * fault rather than a wrong question. So an inapplicable command is rendered disabled with the
+ * reason, rather than hidden: the page stays a full catalogue of the guide, and "why is this not
+ * here" is answered on the card.
+ *
+ * This is applicability, not the mode *gating* `actions.ts` performs. The bench still fires
+ * anything the running adapter can physically send - that is the whole point of it - so a command
+ * the module withholds from a mode is still offered here if the adapter has a branch for it.
+ */
+function unavailableReason(command) {
+	if (command.models && !command.models.includes(adapter.model)) {
+		const wanted = command.models.map((model) => MODEL_LABELS[model]).join(' or ')
+		return `Only on the ${wanted}. This bench is running as ${MODEL_LABELS[adapter.model]}; restart with a --mode for that model to reach it.`
+	}
+
+	if (command.modes && !command.modes.includes(config.mode)) {
+		return `Only in ${command.modes.join(' / ')}. Restart the bench with --mode ${command.modes[0]}.`
+	}
+
+	return undefined
+}
+
+// --- Command catalogue ------------------------------------------------------------------------
+
+/**
+ * Declarative so that extending the bench to another guide section is a data change rather than a
+ * rewrite. `run` receives the form values keyed by field id and calls straight through to the
+ * adapter. `models` / `modes` restrict a command to the units that have it - see
+ * `unavailableReason()`.
  */
 const COMMANDS = [
 	{
@@ -631,6 +681,116 @@ const COMMANDS = [
 		],
 		run: (values) => adapter.setFullscreen(values.full),
 	},
+
+	// --- Section 1.3.3, Commands for Sequoia 4K60 ---------------------------------------------
+	// One adapter method serves each of the paired tables below: the guide documents Set Routing
+	// and Set Audio twice apiece (once per operating mode), but the 4K60's two modes produce
+	// byte-identical requests, so `Sequoia4K60Adapter` has nothing to branch on. The section label
+	// carries both table numbers rather than pretending there is only one.
+	{
+		id: 'set_routing_4k60',
+		section: '1.3.3.1-2',
+		name: 'Routing - Set',
+		models: ['sequoia-4k60'],
+		note: 'Input 0 duplicates HDMI OUT 1’s multiview layout and is valid only for OUT 2/3/4. OUT 5 exists on this model only. Window ID means the quad-view window on OUT 1, and the mode decides what it means elsewhere - the request shape does not change.',
+		fields: [
+			{ id: 'input', label: 'Input Port', type: 'number', default: 1 },
+			{ id: 'port', label: 'Output Port', type: 'number', default: 1 },
+			{ id: 'winid', label: 'Window ID', type: 'number', default: 1 },
+		],
+		run: (values) => adapter.setRouting(values.input, values.port, values.winid),
+	},
+	{
+		id: 'get_routing_4k60',
+		section: '1.3.3.3',
+		name: 'Routing Info - Get',
+		models: ['sequoia-4k60'],
+		note: 'Screenshot-only response in the guide, and unrecorded anywhere else. Asks for type route2win - the 4K60L asks for hdmi_output instead, so the two models genuinely differ here rather than sharing a request.',
+		fields: [],
+		run: () => adapter.getRouting(),
+	},
+	{
+		id: 'set_audio_4k60',
+		section: '1.3.3.4-5',
+		name: 'Audio - Set',
+		models: ['sequoia-4k60'],
+		note: 'Window 0 turns the output’s audio off; 1-4 selects a window.',
+		fields: [
+			{ id: 'port', label: 'Output Port', type: 'number', default: 1 },
+			{ id: 'winid', label: 'Window ID', type: 'number', default: 0 },
+		],
+		run: (values) => adapter.setAudio(values.port, values.winid),
+	},
+
+	// --- Section 1.3.4, Commands for Sequoia 4K60L --------------------------------------------
+	// Unlike the 4K60, this model's modes really do change the request shape, so the cards below
+	// are worth firing once per mode. Tables 1.3.4.6 (K/M Control) and 1.3.4.9/1.3.4.10 (Output
+	// Resolution) are absent here on purpose: section 1.3.1 documents both for the 4K60 in the
+	// same shape, so there is one adapter method each and they already appear under 1.3.1.13 and
+	// 1.3.1.4 above. Firing those cards on a 4K60L is firing these commands.
+	{
+		id: 'set_routing_4k60l',
+		section: '1.3.4.1-3',
+		name: 'Routing - Set',
+		models: ['sequoia-4k60l'],
+		note: 'The clearest case of a mode changing the wire shape: quad-bypass sends route2win for OUT 1 but hdmi_output (with enable/mode hardcoded) for OUT 2/3, while single-view seamless always sends route2win with Window ID forced to 1 whatever you type. Watch the URL to see which branch you got. In daisy-chain mode this sends nothing at all - section 1.3.5 has no Routing - Set, so the adapter has no branch for it and the result panel will say no request was made.',
+		fields: [
+			{ id: 'input', label: 'Input Port', type: 'number', default: 1 },
+			{ id: 'port', label: 'Output Port', type: 'number', default: 1 },
+			{ id: 'winid', label: 'Window ID', type: 'number', default: 1 },
+		],
+		run: (values) => adapter.setRouting(values.input, values.port, values.winid),
+	},
+	{
+		id: 'get_routing_4k60l',
+		section: '1.3.4.4',
+		name: 'Routing Info - Get',
+		models: ['sequoia-4k60l'],
+		note: 'Screenshot-only response in the guide. Asks for type hdmi_output. The adapter does not branch on mode, so this fires in daisy-chain mode too - section 1.3.5 does not list it, which makes whatever comes back there worth recording rather than trusting.',
+		fields: [],
+		run: () => adapter.getRouting(),
+	},
+	{
+		id: 'set_km_reboot_mode',
+		section: '1.3.4.5',
+		name: 'Power-on K/M Mode - Set',
+		models: ['sequoia-4k60l'],
+		modes: ['sequoia-4k60l-quad-bypass'],
+		note: 'Sets which K/M target the unit comes up in after a power cycle. 0 = Host, 1-4 = that window’s remote. Distinct from K/M Control (1.3.1.13), which switches the live target and does not survive a reboot. Port is fixed to 1 by the adapter, the only value the guide’s example shows.',
+		fields: [{ id: 'mode', label: 'Power-on Mode', type: 'number', default: 0 }],
+		run: (values) => adapter.setKmRebootMode(values.mode),
+	},
+	{
+		id: 'set_audio_4k60l',
+		section: '1.3.4.7-8',
+		name: 'Audio - Set',
+		models: ['sequoia-4k60l'],
+		note: 'Quad-bypass sends port 1 plainly but adds location:1 for OUT 2/3; single-view seamless sends port and window straight through, and accepts only window 0 or 1. In daisy-chain mode this switches to a different cmd family entirely - Daisy rather than 2060, with location and port both pinned to 1 - which is Table 1.3.5.2. Same button, three wire shapes; read the URL.',
+		fields: [
+			{ id: 'port', label: 'Output Port', type: 'number', default: 1 },
+			{ id: 'winid', label: 'Window ID', type: 'number', default: 0 },
+		],
+		run: (values) => adapter.setAudio(values.port, values.winid),
+	},
+
+	// --- Section 1.3.5, Command for Sequoia 4K60L in Daisy Chain ------------------------------
+	// Of the four commands 1.3.5 names, only Label Text (1.3.5.1) has an adapter method of its own.
+	// Audio (1.3.5.2) is the 1.3.4 card above taking its daisy branch; K/M Control (1.3.5.3) and
+	// Output Resolution (1.3.5.4) are the 1.3.1.13 and 1.3.1.4 cards - the requests are
+	// byte-identical to the ones 1.3.1 documents, so there is one adapter method each.
+	{
+		id: 'set_label_daisy',
+		section: '1.3.5.1',
+		name: 'Label Text - Set',
+		models: ['sequoia-4k60l'],
+		modes: ['sequoia-4k60l-daisy-chain'],
+		note: 'Not the same command as Window Label Text - Set (1.3.2.4) above, despite doing the same job: this one sends daisy:1 and addresses ports 1-16 across the chain. It is the label command that is documented to work on a chained unit - 1.3.2.4 is the one that breaks manual label editing there, so use this card and not that one.',
+		fields: [
+			{ id: 'port', label: 'Port (1-16)', type: 'number', default: 1 },
+			{ id: 'label', label: 'Label', type: 'text', default: 'Bench Test' },
+		],
+		run: (values) => adapter.setLabel(values.port, values.label),
+	},
 ]
 
 // --- HTTP server ----------------------------------------------------------------------------
@@ -651,6 +811,15 @@ async function handleSend(request, response) {
 	if (!command) {
 		response.writeHead(404, { 'content-type': 'application/json' })
 		response.end(JSON.stringify({ error: `Unknown command: ${id}` }))
+		return
+	}
+
+	// The card renders its Send button disabled, but /send is reachable regardless - and calling
+	// a 4K60L-only method through a 4K60 adapter throws a TypeError that reads like a bench bug.
+	const unavailable = unavailableReason(command)
+	if (unavailable) {
+		response.writeHead(409, { 'content-type': 'application/json' })
+		response.end(JSON.stringify({ error: unavailable }))
 		return
 	}
 
@@ -768,19 +937,53 @@ function renderCard(command) {
 	// daisy chain - the section 1.3.1 commands that erase device state.
 	const warning = command.warn ? `<p class="warn">${escapeHtml(command.warn)}</p>` : ''
 
+	// Sections 1.3.3-1.3.5 are not on every unit. An inapplicable command stays on the page so it
+	// remains a full catalogue, with its Send disabled and the reason where the warnings go.
+	const unavailable = unavailableReason(command)
+
 	return `
-<section class="card" data-command="${command.id}">
+<section class="card${unavailable ? ' unavailable' : ''}" data-command="${command.id}">
 	<header>
 		<span class="tag">${escapeHtml(command.section)}</span>
 		<h2>${escapeHtml(command.name)}</h2>
 	</header>
+	${unavailable ? `<p class="unavailable-note">${escapeHtml(unavailable)}</p>` : ''}
 	${warning}
 	${daisyWarning}
 	${note}
 	${fields}
-	<button type="button">Send</button>
+	<button type="button"${unavailable ? ' disabled' : ''}>Send</button>
 	<pre class="result" hidden></pre>
 </section>`
+}
+
+/** Cards grouped under their guide section, in section order, so a long page stays navigable. */
+function renderSections() {
+	const groups = new Map()
+
+	for (const command of COMMANDS) {
+		const key = sectionGroup(command.section)
+		if (!groups.has(key)) groups.set(key, [])
+		groups.get(key).push(command)
+	}
+
+	return [...groups.entries()]
+		.map(([key, commands]) => {
+			const available = commands.filter((command) => !unavailableReason(command)).length
+			const count =
+				available === commands.length
+					? `${commands.length} command${commands.length === 1 ? '' : 's'}`
+					: `${available} of ${commands.length} applicable here`
+
+			return `
+<h2 class="section-heading">
+	<span class="tag">${escapeHtml(key)}</span>
+	${escapeHtml(SECTION_TITLES[key] ?? '')}
+	<span class="section-count">${escapeHtml(count)}</span>
+</h2>
+${commands.map(renderCard).join('')}`
+		})
+		.join('')
 }
 
 function renderPage() {
@@ -810,6 +1013,13 @@ function renderPage() {
 	.note { color:var(--muted); font-size:.85rem; margin:.6rem 0 0; }
 	.warn { margin:.7rem 0 0; padding:.55rem .7rem; border:1px solid var(--bad); border-left-width:3px;
 		border-radius:6px; color:var(--bad); font-size:.85rem; }
+	.section-heading { display:flex; align-items:baseline; gap:.6rem; font-size:.95rem; font-weight:600;
+		margin:2.2rem 0 .8rem; padding-bottom:.5rem; border-bottom:1px solid var(--line); }
+	.section-heading:first-of-type { margin-top:0; }
+	.section-count { margin-left:auto; font-weight:400; font-size:.78rem; color:var(--muted); }
+	.card.unavailable { opacity:.6; }
+	.unavailable-note { margin:.7rem 0 0; padding:.55rem .7rem; border:1px dashed var(--line);
+		border-radius:6px; color:var(--muted); font-size:.85rem; }
 	.banner { margin:0 0 1.5rem; padding:.8rem 1rem; border:1px solid var(--bad); border-left-width:3px;
 		border-radius:8px; background:var(--card); font-size:.88rem; }
 	.banner strong { color:var(--bad); }
@@ -832,9 +1042,10 @@ function renderPage() {
 <main>
 	<h1>Sequoia command bench</h1>
 	<p class="target">
-		Section 1.3.2 &mdash; Commands for Controlling Window &middot;
+		Sections 1.3.1 &ndash; 1.3.5 &middot;
 		device <code>${escapeHtml(config.host)}${config.port !== 80 ? `:${config.port}` : ''}</code> &middot;
-		mode <code>${escapeHtml(config.mode)}</code>
+		mode <code>${escapeHtml(config.mode)}</code> &middot;
+		model <code>${escapeHtml(adapter.model)}</code>
 	</p>
 	${
 		config.mode === 'sequoia-4k60l-daisy-chain'
@@ -844,7 +1055,7 @@ function renderPage() {
 			   cannot detect. Treat any result here as unverified unless you confirm it on the hardware.</div>`
 			: ''
 	}
-	${COMMANDS.map(renderCard).join('')}
+	${renderSections()}
 </main>
 <script>
 document.querySelectorAll('.card').forEach((card) => {

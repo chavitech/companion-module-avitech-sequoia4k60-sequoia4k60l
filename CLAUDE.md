@@ -50,7 +50,33 @@ Two things make it trustworthy, and both are worth preserving:
   `file://` could fire commands but never read the reply. The local server exists to read it.
 
 Its `COMMANDS` array is declarative — extending the bench to another guide section is a data
-change, not a rewrite. It currently covers sections 1.3.1 and 1.3.2.
+change, not a rewrite. It covers every adapter method: sections 1.3.1 through 1.3.5.
+
+Sections 1.3.3–1.3.5 are the first commands that are not on every unit, so entries carry optional
+`models` and `modes` lists. An inapplicable command is rendered **disabled with the reason** rather
+than hidden, so the page stays a full catalogue of the guide and "why is this not here" is answered
+on the card. `unavailableReason()` is enforced in `handleSend()` too, not only in the markup —
+`setKmRebootMode` and `setLabel` exist only on `Sequoia4K60LAdapter`, and reaching one through a
+4K60 adapter is a `TypeError` that reads like a bench fault rather than a wrong question.
+
+This is applicability, **not** the mode gating `actions.ts` performs. The bench still fires anything
+the running adapter can physically send — that is the point of it — so a command Companion withholds
+from a mode is still offered here when the adapter has a branch for it.
+
+Two consequences of driving the real adapters worth knowing before reading a result:
+
+- **Routing — Set sends nothing at all in daisy-chain mode.** §1.3.5 has no routing command, so
+  `Sequoia4K60LAdapter.setRouting()` has no branch for that mode and falls through silently. The
+  result panel reports "no request was made", which is the honest answer, but it is not a device
+  response and must not be read as one.
+- **One card, several wire shapes.** `set_audio_4k60l` sends `2060`/`audio` with `location` for
+  quad-bypass OUT 2/3, without it for single-view, and switches to the `Daisy` cmd family entirely
+  in daisy-chain mode. `set_routing_4k60l` similarly splits between `route2win` and `hdmi_output`.
+  Read the URL the bench prints rather than assuming which branch ran.
+
+Tables 1.3.4.6 and 1.3.4.9/1.3.4.10 have no cards of their own: §1.3.1 documents K/M Control and
+Output Resolution for the 4K60 in the same shape, so there is one adapter method each and firing
+the 1.3.1.13 / 1.3.1.4 cards on a 4K60L _is_ firing them. Same for 1.3.5.3 and 1.3.5.4.
 
 Two things the bench does that Companion does not:
 
@@ -275,5 +301,12 @@ Anything else that parses as JSON is returned parsed; anything that doesn't is r
   onto those — so the parsing stays usable by anything else that needs live input state.
 - Actions, feedbacks, presets, and variables are each registered from their own module via an
   `Update*(self)` function called from `ModuleInstance`. Keep that shape; `actions.ts` is by far
-  the largest file and is where mode-dependent option lists are built. `presets.ts` is still the
-  untouched skeleton stub (`mylabel` / "Section One") — the only one left.
+  the largest file and is where mode-dependent option lists are built.
+- **`presets.ts` is gated by mode for the same reason `actions.ts` is.** A preset may only reference
+  an action id that exists in the configured mode, or applying it binds a step to an action the
+  module never registered — so its mode predicates mirror `UpdateActions()` exactly, and
+  `updatePresets()` is called from `configUpdated()` as well as `init()`. Adding a mode therefore
+  means checking three places, not one: `DEVICE_MODES`/`DEVICE_MODE_CHOICES`, the `actions.ts`
+  gating, and here. In daisy-chain mode the preset list is Audio and K/M Control only.
+  Variable references in preset text use the `sequoia:` prefix — the manifest `shortname`, which
+  Companion rewrites to the user's connection label when the preset is applied.

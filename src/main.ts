@@ -61,6 +61,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.config = config
 		this.adapter = createAdapter(this.config.mode, this, this.api)
 		this.updateActions() // action list/options depend on the configured mode
+		this.updatePresets() // presets reference actions, so they are gated by mode for the same reason
 
 		await this.checkConnection()
 		this.startPolling()
