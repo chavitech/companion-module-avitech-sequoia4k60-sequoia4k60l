@@ -319,9 +319,8 @@ export abstract class SequoiaAdapter {
 	 * extension and no wrapping object, and an empty list is an ordinary successful read rather than
 	 * an error. A name from here feeds `loadCustomPreset()` and `deleteCustomPreset()` unchanged.
 	 *
-	 * The ordering is **not** settled. It is not ascending alphabetical, but the capture cannot tell
-	 * newest-first from descending alphabetical - the newer file was also the later string. Nothing
-	 * may assume element 0 is the most recent preset.
+	 * The ordering is **newest-first**: `Alpha`, saved last, came back first, which is what rules out
+	 * descending-alphabetical. `parseCustomPresetList()` preserves that order rather than sorting.
 	 */
 	async listCustomPresets(): Promise<AvitechResponse> {
 		return this.api.sendCommand('2060', { func: 'list', type: 'custom_preset', port: SYSTEM_COMMAND_PORT })

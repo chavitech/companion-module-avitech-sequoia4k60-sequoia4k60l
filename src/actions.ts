@@ -15,6 +15,7 @@ import {
 import {
 	ACTIVE_BORDER_CHOICES,
 	ALERT_DISPLAY_CHOICES,
+	CustomPresetChoices,
 	AUTO_HIDE_LABEL_CHOICES,
 	BORDER_WIDTH_CHOICES,
 	DEFAULT_LAYOUT_CHOICES,
@@ -237,6 +238,40 @@ const LABEL_CHARSET_TOOLTIP = 'Allowed characters exclude: < > ! @ # $ % ^ & * "
 
 /** Table 1.3.1.7/1.3.1.9. The device rejects a name outside this set with "Wrong format". */
 const PRESET_NAME_TOOLTIP = 'Allowed characters: A-Z, a-z, 0-9, period, dash and underscore.'
+
+/**
+ * The same rule as `PRESET_NAME_TOOLTIP`, for the `allowCustom` half of the preset pickers. It
+ * catches a mistyped name in the UI instead of letting the device answer "Wrong format" at press
+ * time - which matters most for Delete, where the request is not undoable.
+ */
+const PRESET_NAME_REGEX = '/^[A-Za-z0-9._-]+$/'
+
+/**
+ * Shared by the Load and Delete preset pickers.
+ *
+ * A dropdown of the names the device reported (Table 1.3.1.8, newest first), plus `allowCustom` so
+ * a name can still be typed. Both halves are needed: the list is only as fresh as the last refresh,
+ * and a preset saved on the unit since then would otherwise be unreachable. It is also what keeps
+ * the field usable on a unit with nothing saved, where the choice list is legitimately empty.
+ *
+ * `preselect` is false for Delete. Load defaults to the newest preset because that is a convenience
+ * and a wrong guess costs a reload; Delete starts blank so that an action added to a button and not
+ * yet configured is not already pointing at a real preset. An empty name is refused by the device,
+ * which makes an unconfigured Delete a no-op rather than a deletion of whatever happened to be
+ * first in the list.
+ */
+function PresetNameField(names: string[], tooltip: string, preselect: boolean): SomeCompanionActionInputField<'name'> {
+	return {
+		id: 'name',
+		type: 'dropdown',
+		label: 'Preset Filename',
+		default: preselect ? (names[0] ?? '') : '',
+		choices: CustomPresetChoices(names),
+		allowCustom: true,
+		regex: PRESET_NAME_REGEX,
+		tooltip,
+	}
+}
 
 export function UpdateActions(self: ModuleInstance): void {
 	const mode = self.config.mode
@@ -738,13 +773,11 @@ export function UpdateActions(self: ModuleInstance): void {
 			? {
 					name: 'Load Custom Preset',
 					options: [
-						{
-							id: 'name',
-							type: 'textinput',
-							label: 'Preset Filename',
-							default: '',
-							tooltip: PRESET_NAME_TOOLTIP,
-						},
+						PresetNameField(
+							self.customPresets,
+							`Pick a preset the device reported, or type a name. ${PRESET_NAME_TOOLTIP}`,
+							true,
+						),
 					],
 					callback: async (event) => {
 						try {
@@ -760,14 +793,19 @@ export function UpdateActions(self: ModuleInstance): void {
 		supportsSystemCommands
 			? {
 					name: 'Refresh Custom Preset List',
+					description:
+						'Re-reads the presets saved on the device and repopulates the Load and Delete pickers. Press after saving or deleting a preset from the units own GUI.',
 					options: [],
 					callback: async () => {
-						try {
-							const result = await self.adapter.listCustomPresets()
-							self.log('info', `Custom presets: ${JSON.stringify(result)}`)
-						} catch (error) {
-							self.log('error', `Refresh Custom Preset List failed: ${(error as Error).message}`)
-						}
+						// refreshCustomPresets() rebuilds the action definitions, which is the whole
+						// point of the press - the pickers' choices are fixed when they are defined.
+						await self.refreshCustomPresets()
+						self.log(
+							'info',
+							self.customPresets.length
+								? `Custom presets: ${self.customPresets.join(', ')}`
+								: 'Custom presets: none saved on the device',
+						)
 					},
 				}
 			: undefined
@@ -777,13 +815,11 @@ export function UpdateActions(self: ModuleInstance): void {
 			? {
 					name: 'Delete Custom Preset (cannot be undone)',
 					options: [
-						{
-							id: 'name',
-							type: 'textinput',
-							label: 'Preset Filename',
-							default: '',
-							tooltip: `Permanently deletes this preset from the device. ${PRESET_NAME_TOOLTIP}`,
-						},
+						PresetNameField(
+							self.customPresets,
+							`Permanently deletes this preset from the device. Picking from the list avoids a typo deleting the wrong one. ${PRESET_NAME_TOOLTIP}`,
+							false,
+						),
 					],
 					callback: async (event) => {
 						try {

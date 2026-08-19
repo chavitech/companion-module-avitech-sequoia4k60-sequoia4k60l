@@ -213,9 +213,6 @@ mode-specific rather than a blanket doubt about §1.3.2, and it is now the stron
   exactly the kind this project has already seen fail. Port 5 (4K60-only, §1.3.1.4) is unexercised.
 - **The 4K60L's other two modes.** Single-View Seamless has never been on a bench at all.
   Daisy chain has, with the negative results above.
-- **Custom Preset File List (§1.3.1.8) ordering.** Everything else about it is now recorded from a
-  4K60L on 2026-08-19 — see below. The one loose end is what the array's order means, and the
-  capture cannot settle it.
 - Firmware Version, Network and OSD Info were recovered from the guide's figures as images
   (`pdfimages -png -f <page>`) rather than from hardware — see below. **Signal Type (§1.3.1.2) is
   captured from hardware and implemented.**
@@ -226,29 +223,56 @@ The last `get` whose response shape was unrecorded anywhere. Captured from a 4K6
 reads, with presets saved between them:
 
 ```
-[]                                 no presets saved
-["TestPreset"]                     after saving TestPreset
-["TestPreset2","TestPreset"]       after then saving TestPreset2
+[]                                     no presets saved
+["TestPreset"]                         after saving TestPreset
+["TestPreset2","TestPreset"]           after then saving TestPreset2
+["Alpha","TestPreset2","TestPreset"]   after then saving Alpha
 ```
 
 - **Elements are bare filename strings**, not objects, and carry **no extension**. So a name from
   this list feeds straight into `loadCustomPreset()` and `deleteCustomPreset()` with no
-  transformation — the list output and the load/delete input are the same strings.
+  transformation — the list output and the load/delete input are the same strings. That is what
+  makes the pickers below possible; without it the list would need a name-extraction step that
+  could drift from what the load/delete commands accept.
 - **The empty case is an ordinary `[]`** — not `""`, not `"Success"`, not a `cb_status` rejection.
   It needs no special handling and is not an error. `parseResponse` returns it intact: the
   `cb_status` check is guarded by `!Array.isArray(parsed)`, so an array falls straight through.
-- **The order is not ascending alphabetical**, which is the one thing the sample does rule out —
-  `TestPreset` sorts before `TestPreset2` but comes back second. Two readings survive it equally:
-  **newest-first**, or **descending alphabetical**. `TestPreset2` was both the newer file and the
-  later string, so this capture cannot separate them. **Do not assume element 0 is the most
-  recently saved preset** — that is exactly the untested half. To settle it, save a preset whose
-  name sorts _early_ (`Alpha`) last of all: newest-first puts it at the front, descending
-  alphabetical puts it at the back.
+- **The order is newest-first**, and element 0 _is_ the most recently saved preset. Establishing
+  that took a deliberately discriminating test: the first two reads were consistent with both
+  newest-first and descending-alphabetical, because `TestPreset2` was simultaneously the newer file
+  and the later string. Saving `Alpha` last separates them — it came back first, which
+  descending-alphabetical cannot produce. The order is preserved rather than sorted in
+  `parseCustomPresetList()`, so the newest preset stays at the top of the pickers.
 
 Four places where the guide's prose and its worked example disagree, and the example was followed:
 `en` vs `enable` (§1.3.1.15), `mode` vs `sob_alarm` (§1.3.1.22), `preset_num` vs `preset_unm`
 (§1.3.1.6), and `signal` (§1.3.1.2, below). The quad-bypass pass confirms the example was the right
 choice in each case.
+
+### The custom preset pickers
+
+Load Custom Preset (§1.3.1.7) and Delete Custom Preset (§1.3.1.9) take a **dropdown of the names
+the device reported**, built by `PresetNameField()` in `actions.ts` from `ModuleInstance.customPresets`.
+
+- **`allowCustom` is on, and both halves are load-bearing.** The list is only as fresh as the last
+  refresh, so a preset saved on the unit since then would otherwise be unreachable; and a unit with
+  nothing saved has a legitimately empty choice list, which without a typed fallback would be a
+  dead control. The `regex` catches a mistyped name in the UI rather than letting the device answer
+  `Wrong format` at press time.
+- **`customPresets` is not polled.** Presets change only when someone saves or deletes one, so it is
+  read in `init()` and `configUpdated()` and on demand from the "Refresh Custom Preset List" action.
+  That action exists to rebuild the pickers — a dropdown's choices are fixed when the action is
+  defined, so `refreshCustomPresets()` calls `updateActions()`.
+- **Empty is a real value, not a "not loaded" marker.** A unit with no presets returns `[]`, so
+  nothing may treat an empty list as a failed read.
+- **`refreshCustomPresets()` never throws.** It runs during `init()`, where an unreachable device
+  must still leave a working instance — the pickers fall back to typed names, which is what they
+  were before they had a list. `checkConnection()` has already reported connection state, so a
+  failure is logged at `debug` rather than raised twice.
+- **Delete starts blank; Load pre-selects the newest preset.** Load is a convenience where a wrong
+  guess costs a reload. Delete is not undoable, so an action added to a button and not yet
+  configured must not already point at a real preset — and the device refuses an empty name, which
+  makes an unconfigured Delete a no-op.
 
 `ModuleInstance.adapter` is rebuilt in both `init()` and `configUpdated()`, because changing the
 configured mode must swap the adapter and rebuild the action list.
