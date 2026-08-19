@@ -167,35 +167,61 @@ justified rather than precautionary:
   §1.3.2 command with a known harmful effect in this mode. Companion won't offer it there, but
   `tools/bench.mjs` does not gate by mode and will happily fire it.
 
-**§1.3.1 is almost entirely un-bench-tested.** Every request shape in it was verified against the
-guide's worked examples and nothing more. That is a weaker claim than it sounds — the §1.3.2
-findings above were also guide-faithful right up until hardware showed that `z` and `global_option`
-behave nothing like the documentation says.
+## What hardware has actually confirmed
 
-The one exception, tested on a 4K60L on 2026-07-29: **Reset Factory Defaults (§1.3.1.11) does not
-apply when sent.** The unit carries on with its presets and full command set intact, and the reset
-only lands on the next reboot. So the destructive window closes at the power cut, not at the button
-press, and a unit that has been sent this looks completely normal until someone reboots it. Warnings
-in `base.ts`, `actions.ts` and `bench.mjs` say "destructive" without saying "immediate" for exactly
+This module's history is that guide-faithful and correct are different claims — the §1.3.2 findings
+above were guide-faithful right up until hardware showed that `z` and `global_option` behave nothing
+like the documentation says. So what follows tracks the difference deliberately. **Do not upgrade a
+claim here without re-testing; do not quietly downgrade one either.**
+
+**Bench-tested on a 4K60L in Quad Multiview + Bypass mode, 2026-08-19: every command the bench
+offers in that mode succeeds and behaves as documented.** That is all of §1.3.1, all of §1.3.2, and
+§1.3.4's routing, routing-info, audio and power-on K/M mode — 37 of the bench's 41 cards. The four
+it withholds there are the 4K60-only §1.3.3 trio and the daisy-chain-only Label Text.
+
+Four things that were open assumptions and are now settled, all confirmed on that unit:
+
+- **`setOsd` is additive.** An unaddressed key is left alone, so the task-shaped actions in
+  `actions.ts` really can each write only their own keys without disturbing another's. This was the
+  module's biggest untested assumption — `setWindowGeometry` had to abandon exactly the same one.
+- **The destructive commands do what they claim.** Reset Factory Defaults (§1.3.1.11) and Custom
+  Preset — Delete (§1.3.1.9) both land. See the reboot caveat below, which is unchanged.
+- **`idle_time` (§1.3.1.24) is in seconds.** The guide's Cmd-Value row is blank — no range, no
+  units, no disable value — and seconds was inferred from a single example (120 described as "2
+  minutes"). The inference was right. The 0–65535 bound in `actions.ts` is still this module's
+  invention rather than a vendor-stated limit.
+- **§1.3.1.23's `enable` really is inverted.** `0` turns power saving **on**. The guide's wording is
+  not a transcription error.
+
+Still standing, tested on a 4K60L on 2026-07-29: **Reset Factory Defaults does not apply when
+sent.** The unit carries on with its presets and full command set intact, and the reset only lands
+on the next reboot. The destructive window closes at the power cut, not at the button press, so a
+unit that has been sent this looks completely normal until someone reboots it. Warnings in
+`base.ts`, `actions.ts` and `bench.mjs` say "destructive" without saying "immediate" for exactly
 this reason — do not re-tighten that wording without re-testing.
 
-Specific things to establish on real hardware before trusting them:
+Note what the quad-bypass pass does to the daisy-chain findings: **§1.3.2 is not broken in general,
+it is broken in daisy chain.** The same seven commands that return `Success` and do nothing on a
+chained unit work correctly on the same model in quad-bypass. That makes the `!isDaisyChain` gating
+mode-specific rather than a blanket doubt about §1.3.2, and it is now the stronger reading of the
+2026-07-29 results.
 
-- The `get` responses are screenshot-only in the guide, so the PDF's text layer does not contain
-  them — but the figures are extractable as images (`pdfimages -png -f <page>`), and doing so
-  decodes Firmware Version, Network and OSD Info without needing hardware. Custom Preset File List
-  is still unrecorded. **Signal Type (§1.3.1.2) is captured and implemented — see below.**
-- Whether `setOsd` really is additive. The module assumes an unaddressed key is left alone, because
-  every worked example sends a partial `data` object. `setWindowGeometry` had to abandon exactly
-  that assumption. `getOsdInfo` is the read side to build on if it turns out to be wrong.
-- `idle_time` (§1.3.1.24) has a **blank** Cmd-Value row in the guide — no range, no units, no
-  disable value. Seconds is inferred from its single example (120 described as "2 minutes"); the
-  0–65535 bound in `actions.ts` is this module's invention, not the vendor's.
+### Not yet established
+
+- **The 4K60 is entirely untested.** No hardware has run §1.3.3, and the §1.3.1/§1.3.2 pass above
+  proves nothing about it — the guide claims those sections cover both models, but that claim is
+  exactly the kind this project has already seen fail. Port 5 (4K60-only, §1.3.1.4) is unexercised.
+- **The 4K60L's other two modes.** Single-View Seamless has never been on a bench at all.
+  Daisy chain has, with the negative results above.
+- **Custom Preset File List (§1.3.1.8) response shape.** The one `get` still unrecorded: the guide
+  shows it only as a screenshot, and unlike Firmware Version, Network and OSD Info, its figure has
+  not been decoded. Those three were recovered as images (`pdfimages -png -f <page>`) rather than
+  from hardware — see below. **Signal Type (§1.3.1.2) is captured from hardware and implemented.**
 
 Four places where the guide's prose and its worked example disagree, and the example was followed:
 `en` vs `enable` (§1.3.1.15), `mode` vs `sob_alarm` (§1.3.1.22), `preset_num` vs `preset_unm`
-(§1.3.1.6), and `signal` (§1.3.1.2, below). Also note §1.3.1.23's `enable` is inverted — `0` turns
-power saving **on** — which is the guide's wording, not a transcription error.
+(§1.3.1.6), and `signal` (§1.3.1.2, below). The quad-bypass pass confirms the example was the right
+choice in each case.
 
 `ModuleInstance.adapter` is rebuilt in both `init()` and `configUpdated()`, because changing the
 configured mode must swap the adapter and rebuild the action list.
