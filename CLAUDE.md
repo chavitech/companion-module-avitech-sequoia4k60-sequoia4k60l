@@ -155,10 +155,10 @@ this reason — do not re-tighten that wording without re-testing.
 
 Specific things to establish on real hardware before trusting them:
 
-- The `get` responses (firmware, signal type, network, OSD info, custom preset list) are all
-  screenshot-only in the guide, so no captured shape is recorded for any of them. Signal Type
-  (§1.3.1.2) is the one worth capturing first — it is live per-window state and the only §1.3.1 read
-  worth driving feedbacks from.
+- The `get` responses are screenshot-only in the guide, so the PDF's text layer does not contain
+  them — but the figures are extractable as images (`pdfimages -png -f <page>`), and doing so
+  decodes Firmware Version, Network and OSD Info without needing hardware. Custom Preset File List
+  is still unrecorded. **Signal Type (§1.3.1.2) is captured and implemented — see below.**
 - Whether `setOsd` really is additive. The module assumes an unaddressed key is left alone, because
   every worked example sends a partial `data` object. `setWindowGeometry` had to abandon exactly
   that assumption. `getOsdInfo` is the read side to build on if it turns out to be wrong.
@@ -166,13 +166,72 @@ Specific things to establish on real hardware before trusting them:
   disable value. Seconds is inferred from its single example (120 described as "2 minutes"); the
   0–65535 bound in `actions.ts` is this module's invention, not the vendor's.
 
-Three places where the guide's prose and its worked example disagree, and the example was followed:
-`en` vs `enable` (§1.3.1.15), `mode` vs `sob_alarm` (§1.3.1.22), and `preset_num` vs `preset_unm`
-(§1.3.1.6). Also note §1.3.1.23's `enable` is inverted — `0` turns power saving **on** — which is
-the guide's wording, not a transcription error.
+Four places where the guide's prose and its worked example disagree, and the example was followed:
+`en` vs `enable` (§1.3.1.15), `mode` vs `sob_alarm` (§1.3.1.22), `preset_num` vs `preset_unm`
+(§1.3.1.6), and `signal` (§1.3.1.2, below). Also note §1.3.1.23's `enable` is inverted — `0` turns
+power saving **on** — which is the guide's wording, not a transcription error.
 
 `ModuleInstance.adapter` is rebuilt in both `init()` and `configUpdated()`, because changing the
 configured mode must swap the adapter and rebuild the action list.
+
+## Signal Type (§1.3.1.2) and the poll loop
+
+`src/signal.ts` parses the only §1.3.1 read that reports live state. Captured from a 4K60L on
+2026-08-12 and cross-checked against the guide's Figure 1.3.1.2; the module's variables and the
+`input_signal_present` feedback are built on it.
+
+```json
+[{"input":1,"signal":19,"clock":5939,"total":[4400,2250],"active":[3840,2160],"start":[384,82],"freq":6000},
+ {"input":2,"signal":0}, ...]
+```
+
+- **An input with no signal carries only `input` and `signal`.** Every other key is absent. The
+  guide's figure has all four inputs live and so never shows this, which is why `parseSignalResponse`
+  never infers one key's presence from another's.
+- **`signal` is not `0`/`1`.** The prose says `0(video absent) / 1(video feed)`; the figure shows 3
+  and 5, hardware returned 19. Nor is it a resolution code — the figure's `3` and the captured `19`
+  are both 3840×2160@60 differing only in blanking — and it shares no namespace with
+  `RESOLUTION_MODES` (where 3840×2160 60Hz is 99). Treat it as opaque; only `!== 0` is relied on,
+  and the readable format comes from `active` + `freq`.
+- **`freq` is hundredths of a Hz** (6000 = 60.00, 5994 = 59.94, 2997 = 29.97). **`clock` is a
+  measured pixel clock in units of 0.1 MHz** — every sample checks out against
+  `total[0] × total[1] × freq`. It **jitters**: two inputs carrying an identical format read 5939
+  and 5940. Neither `clock` nor `start` is surfaced as a variable, and neither should be — polling
+  measurement noise onto a button redraws it for nothing.
+- **`input` is 1–4 on both models.** `capabilities.maxPorts` counts HDMI _outputs_ (5 on the 4K60)
+  and must not be used to size this array; `INPUT_IDS` is separate for that reason.
+
+`ModuleInstance` polls this on a timer whose interval is the `pollInterval` config field (seconds,
+`0` disables). Three properties to preserve:
+
+- **It does not poll in daisy-chain mode.** §1.3.5 does not list this command, so polling it would
+  be exactly the request the `actions.ts` gating exists to prevent — and §1.3.2's bench results are
+  the warning about what a chained unit's answer is worth.
+- **`stopPolling()` runs in `destroy()` and at the top of `configUpdated()`.** Host, interval and
+  mode can all change, so the loop is torn down and rebuilt rather than adjusted.
+- **Failures log once, not every tick.** `pollFailing` tracks the transition; an unreachable device
+  would otherwise fill the log at the poll rate. The request has already set `InstanceStatus`.
+
+The "Refresh Input Signal Status" action calls `refreshSignalState()` — the same path the poll uses
+— so a manual press and a tick publish identically.
+
+### The other `get` shapes, decoded from the guide's figures
+
+Recovered by extracting the PDF figures as images rather than from hardware, so these are the
+guide's own screenshots — trustworthy about _shape_, not about any particular unit's values.
+
+- **Firmware Version** (`Info`/`device`, Figure 1.3.1.1) — a flat object. Beyond the version
+  strings it carries live state with no other read path: `resolution[5]`, `audio[5]`, `osd_en[5]`,
+  `remote_en[5]`, `sib_hdcp[4]`, `custom_edid[4]`, `daisy_chain`, `daisy_audio`, `daisy_active`,
+  `idle_time`, `fading_time`, `temp`, `machine_name`, `wall_lock_status`. This is the obvious
+  source for a second wave of variables, and `checkConnection()` already sends it.
+- **Network** (`Info`/`machinelist`, Figure 1.3.1.3) — an array of
+  `{IP, MAC, MACHINE, NAME, AVAHI_IP}`, keys uppercase. Note it lists **every** Sequoia on the
+  subnet, not just the addressed one, so nothing may assume element 0 is this instance.
+- **OSD Info** (`2060`/`get`/`osd`, Figure 1.3.1.14) — confirms all 15 `OsdSettings` keys the module
+  writes, spelled identically, colours as `[r,g,b,a]`. It also returns `show_tally2`, `show_tally3`,
+  `tally2_on_color`, `tally2_off_color` and `tally3_off_color`, which `OsdSettings` does not model —
+  tally channels 2 and 3 are unimplemented, not deliberately excluded.
 
 ## Device HTTP API
 
@@ -211,6 +270,10 @@ Anything else that parses as JSON is returned parsed; anything that doesn't is r
   `DeviceColor`) are declared in `base.ts` and flow **outward** to these modules — never the
   reverse. That is what lets `system.ts` hold a value import of `@companion-module/base` for
   `splitRgb` without dragging it into the adapter chain and breaking the bench.
+- `src/signal.ts` is the response-parsing counterpart: §1.3.1.2's reply shape, its choice list, and
+  the display formatting. It knows nothing about variable names — `variables.ts` maps `InputSignal`
+  onto those — so the parsing stays usable by anything else that needs live input state.
 - Actions, feedbacks, presets, and variables are each registered from their own module via an
   `Update*(self)` function called from `ModuleInstance`. Keep that shape; `actions.ts` is by far
-  the largest file and is where mode-dependent option lists are built.
+  the largest file and is where mode-dependent option lists are built. `presets.ts` is still the
+  untouched skeleton stub (`mylabel` / "Section One") — the only one left.

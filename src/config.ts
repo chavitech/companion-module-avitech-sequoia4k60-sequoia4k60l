@@ -5,7 +5,14 @@ export type ModuleConfig = {
 	mode: DeviceMode
 	host: string
 	port: number
+	/** Seconds between "Signal Type - Get" polls. 0 disables polling. See `POLL_INTERVAL_DISABLED`. */
+	pollInterval: number
 }
+
+/** The `pollInterval` value that turns the signal poll loop off entirely. */
+export const POLL_INTERVAL_DISABLED = 0
+
+export const POLL_INTERVAL_DEFAULT = 2
 
 export function GetConfigFields(): SomeCompanionConfigField[] {
 	return [
@@ -32,6 +39,17 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 			min: 1,
 			max: 65535,
 			default: 80,
+		},
+		{
+			type: 'number',
+			id: 'pollInterval',
+			label: 'Signal Poll Interval (seconds)',
+			width: 6,
+			min: POLL_INTERVAL_DISABLED,
+			max: 3600,
+			default: POLL_INTERVAL_DEFAULT,
+			tooltip:
+				'How often to refresh input signal variables and feedbacks. Set to 0 to disable. Polling is always off in daisy-chain mode, where section 1.3.5 does not list this command.',
 		},
 	]
 }

@@ -2,6 +2,7 @@ import type { CompanionActionDefinition, DropdownChoice, SomeCompanionActionInpu
 import type ModuleInstance from './main.js'
 import { Sequoia4K60LAdapter } from './adapters/index.js'
 import { RESOLUTION_MODES } from './resolutions.js'
+import { formatSignal } from './signal.js'
 import {
 	ASPECT_CHOICES,
 	FULLSCREEN_CHOICES,
@@ -645,11 +646,13 @@ export function UpdateActions(self: ModuleInstance): void {
 		supportsSystemCommands
 			? {
 					name: 'Refresh Input Signal Status',
+					description:
+						'Updates the input signal variables and feedbacks immediately. Only needed if the poll interval is long or polling is disabled.',
 					options: [],
 					callback: async () => {
 						try {
-							const result = await self.adapter.getSignalType()
-							self.log('info', `Input signal status: ${JSON.stringify(result)}`)
+							const signals = await self.refreshSignalState()
+							self.log('info', `Input signal status: ${signals.map(formatSignal).join(' | ')}`)
 						} catch (error) {
 							self.log('error', `Refresh Input Signal Status failed: ${(error as Error).message}`)
 						}
