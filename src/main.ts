@@ -8,7 +8,7 @@ import {
 } from './variables.js'
 import { UpgradeScripts } from './upgrades.js'
 import { UpdateActions, type ActionsSchema } from './actions.js'
-import { SIGNAL_FEEDBACK_ID, UpdateFeedbacks, type FeedbacksSchema } from './feedbacks.js'
+import { DEVICE_FEEDBACK_IDS, SIGNAL_FEEDBACK_ID, UpdateFeedbacks, type FeedbacksSchema } from './feedbacks.js'
 import { UpdatePresets } from './presets.js'
 import { AvitechHttpApi } from './avitech-api.js'
 import { createAdapter, type SequoiaAdapter } from './adapters/index.js'
@@ -51,13 +51,12 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	customPresets: string[] = []
 
 	/**
-	 * Latest parsed "Firmware Version - Get" state (Table 1.3.1.1), published as the `firmware_*`,
-	 * `machine_*` and `mac_address` variables.
+	 * Latest parsed "Firmware Version - Get" state (Table 1.3.1.1).
 	 *
-	 * Not polled, and for a stronger reason than `customPresets`: these strings cannot change while
-	 * the unit is running. They are refreshed wherever the module already sends this command -
-	 * `checkConnection()` on every init and config change - plus on demand from the "Refresh
-	 * Firmware Version" action.
+	 * Two halves with different lifetimes behind one read. The version and identity strings cannot
+	 * change while the unit runs; `health` can, which is why this joined the poll loop rather than
+	 * staying the connect-time read it started as. One request serves both - the device has no
+	 * narrower command - so polling the health fields costs nothing extra beyond the tick itself.
 	 */
 	deviceInfo: DeviceInfo = emptyDeviceInfo()
 
@@ -153,12 +152,18 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	}
 
 	/**
-	 * Starts the "Signal Type - Get" poll loop, unless it is switched off or not applicable.
+	 * Starts the poll loop - "Signal Type - Get" and "Firmware Version - Get" - unless it is switched
+	 * off or not applicable.
 	 *
 	 * Not applicable in daisy-chain mode: section 1.3.5 names the only four commands assumed to work
-	 * on a chained unit and this is not one of them, so polling it would be exactly the kind of
-	 * request `actions.ts` gates out - and section 1.3.2's bench results are a warning that a
+	 * on a chained unit and neither of these is one of them, so polling them would be exactly the
+	 * kind of request `actions.ts` gates out - and section 1.3.2's bench results are a warning that a
 	 * chained unit can answer such a request without the answer meaning anything.
+	 *
+	 * Note this is a narrower rule than the one `checkConnection()` follows, and deliberately so.
+	 * That sends Firmware Version once per connect in every mode, because a reachability check has to
+	 * work everywhere and one request is not a pattern. Repeating it on a timer is, so the health
+	 * variables and feedbacks simply do not update on a chained unit. Their descriptions say so.
 	 */
 	private startPolling(): void {
 		// Falls back to the field's default rather than to "disabled": an instance saved before
@@ -175,8 +180,8 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			return
 		}
 
-		this.pollTimer = setInterval(() => void this.pollSignal(), intervalSeconds * 1000)
-		void this.pollSignal() // don't make the first values wait a whole interval
+		this.pollTimer = setInterval(() => void this.pollDevice(), intervalSeconds * 1000)
+		void this.pollDevice() // don't make the first values wait a whole interval
 	}
 
 	private stopPolling(): void {
@@ -189,7 +194,19 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.pollFailing = false
 	}
 
-	private async pollSignal(): Promise<void> {
+	/**
+	 * One tick: the signal read and the device-info read, in that order.
+	 *
+	 * They are awaited in sequence rather than with `Promise.all` on purpose. This is a small
+	 * embedded web server on a device whose firmware is not regression tested, and two concurrent
+	 * cgi-bin requests every tick is a load pattern nothing here has established it handles. In
+	 * sequence the tick is two ordinary requests, which is what the module already does everywhere
+	 * else.
+	 *
+	 * A failure in either aborts the tick and is reported once. `pollInFlight` still guards the whole
+	 * tick, so a slow device stretches the interval rather than queueing overlapping pairs.
+	 */
+	private async pollDevice(): Promise<void> {
 		if (this.pollInFlight) {
 			return
 		}
@@ -198,16 +215,17 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 
 		try {
 			await this.refreshSignalState()
+			await this.refreshDeviceInfo()
 
 			if (this.pollFailing) {
-				this.log('info', 'Input signal polling recovered')
+				this.log('info', 'Device polling recovered')
 				this.pollFailing = false
 			}
 		} catch (error) {
 			// An unreachable device fails on every tick, so this logs the transition only. The request
 			// itself has already moved InstanceStatus to ConnectionFailure.
 			if (!this.pollFailing) {
-				this.log('warn', `Input signal polling failed: ${(error as Error).message}`)
+				this.log('warn', `Device polling failed: ${(error as Error).message}`)
 				this.pollFailing = true
 			}
 		} finally {
@@ -217,6 +235,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 
 	private publishDeviceInfo(): void {
 		this.setVariableValues(DeviceInfoVariableValues(this.deviceInfo))
+		this.checkFeedbacks(...DEVICE_FEEDBACK_IDS)
 	}
 
 	private publishSignalState(): void {

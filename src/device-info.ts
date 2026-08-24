@@ -103,24 +103,85 @@ export interface DeviceFirmware {
 	kernel: string
 }
 
+/**
+ * The live half of Table 1.3.1.1: state that changes while the unit runs, which is why this read is
+ * polled rather than taken once at connect like the version strings beside it.
+ *
+ * **Only `alertDisplay` has a documented meaning.** Every other field here appears nowhere in the
+ * guide's text - they exist only in the response payload, found by capturing it. `undefined` means
+ * the unit did not report the key at all, which is deliberately distinct from a reported `0`: for
+ * `temp` in particular, zero is a legitimate reading and "no sensor" is not.
+ */
+export interface DeviceHealth {
+	/**
+	 * `temp`, parsed from the string the device sends (`"34"`, `"45"`).
+	 *
+	 * Units are not stated anywhere in the guide. The two readings seen are consistent with Celsius
+	 * and the alert this pairs with is a "temperature alert", but nothing asserts that here - the
+	 * `device_temp_above` feedback takes a threshold from the user, so it is correct either way.
+	 */
+	temp?: number
+	/**
+	 * `fan_status`. **Undocumented.** Read 0 on a healthy 4K60L, which is the only sample there is,
+	 * so whether 0 means "running" or "stopped" is unknown. No feedback claims it is a fault; see
+	 * `feedbacks.ts` for how the undocumented fields are surfaced instead.
+	 */
+	fanStatus?: number
+	/** `sob_alive`. **Undocumented.** Read 1 on both the figure's 4K60 and the captured 4K60L. */
+	sobAlive?: number
+	/** `scaler_alive`. **Undocumented.** Read 1 on both. */
+	scalerAlive?: number
+	/** `daisy_active`. **Undocumented.** Read 0 on both, neither of which was daisy-chained. */
+	daisyActive?: number
+	/**
+	 * `sob_alarm`. **The one documented field here**, and it is a *setting*, not a state: Table
+	 * 1.3.1.22 "Alert Display - Set" defines it as `0 (off) / 1 (on)` for whether the unit displays
+	 * fan-failure and temperature alerts. The captured 4K60L returned 1, meaning alerts are switched
+	 * on - a healthy configuration. Naming it `alarm` would invite exactly the misreading that a
+	 * correctly configured unit is in an alarm state.
+	 */
+	alertDisplay?: number
+	/** `wall_lock_status`. **Undocumented.** Read 0 on both. */
+	wallLockStatus?: number
+	/** `usage_time`. **Undocumented.** Read 0 on both, which is odd for a running unit. */
+	usageTime?: number
+}
+
 /** Identity fields from the same read, published alongside the versions because they arrive free. */
 export interface DeviceInfo {
 	firmware: DeviceFirmware
+	health: DeviceHealth
 	/** `machine_name` ("Sequoia4K60"). The unit's own name for itself, not the configured mode. */
 	machineName: string
 	/** `machine_type` ("Sequoia4K60.v1"). */
 	machineType: string
 	/** `mac_addr` ("00:23:21:00:1E:A0"). */
 	macAddress: string
+	/**
+	 * `ip`, `gateway` and `subnet` - this unit's own network configuration.
+	 *
+	 * Worth surfacing because §1.3.1.3, the command actually named "Network Info", cannot give you
+	 * this: it returns every Sequoia on the subnet with no marker for which one you addressed. These
+	 * three are unambiguous. Absent from the guide's figure and found only in the hardware capture,
+	 * so they are blank on a unit that does not report them. `gateway` came back empty on the
+	 * captured unit, so blank does not necessarily mean unsupported.
+	 */
+	ip: string
+	gateway: string
+	subnet: string
 }
 
 /** The state before any read has succeeded, and what an unparseable reply degrades to. */
 export function emptyDeviceInfo(): DeviceInfo {
 	return {
 		firmware: { cb: '', sob: '', scaler: '', mediator: '', oip: '', web: '', kmMcu: '', kmUsb: '', kernel: '' },
+		health: {},
 		machineName: '',
 		machineType: '',
 		macAddress: '',
+		ip: '',
+		gateway: '',
+		subnet: '',
 	}
 }
 
@@ -151,9 +212,22 @@ export function parseDeviceInfo(response: AvitechResponse): DeviceInfo {
 			kmUsb: toText(entry.km_usb),
 			kernel: toText(entry.kernel),
 		},
+		health: {
+			temp: toOptionalNumber(entry.temp),
+			fanStatus: toOptionalNumber(entry.fan_status),
+			sobAlive: toOptionalNumber(entry.sob_alive),
+			scalerAlive: toOptionalNumber(entry.scaler_alive),
+			daisyActive: toOptionalNumber(entry.daisy_active),
+			alertDisplay: toOptionalNumber(entry.sob_alarm),
+			wallLockStatus: toOptionalNumber(entry.wall_lock_status),
+			usageTime: toOptionalNumber(entry.usage_time),
+		},
 		machineName: toText(entry.machine_name),
 		machineType: toText(entry.machine_type),
 		macAddress: toText(entry.mac_addr),
+		ip: toText(entry.ip),
+		gateway: toText(entry.gateway),
+		subnet: toText(entry.subnet),
 	}
 }
 
@@ -181,6 +255,46 @@ export const FIRMWARE_FIELDS = [
 export type FirmwareVariableId = (typeof FIRMWARE_FIELDS)[number]['id']
 
 /**
+ * The variable-facing view of `DeviceHealth`, and the source of the `device_status_field` feedback's
+ * dropdown. Same `as const` trick as `FIRMWARE_FIELDS`: the ids here are the variable ids.
+ *
+ * `documented` records whether the guide says anything at all about the field, and it is not
+ * decoration - `feedbacks.ts` and `HELP.md` both use it to tell the user which values they can rely
+ * on a meaning for. Only `alert_display` (Table 1.3.1.22) is `true`. Flipping one to `true` means a
+ * guide reference or a bench result, not a confident guess.
+ */
+export const HEALTH_FIELDS = [
+	{ key: 'temp', id: 'device_temp', label: 'Temperature', documented: true },
+	{ key: 'alertDisplay', id: 'device_alert_display', label: 'Alert display enabled', documented: true },
+	{ key: 'fanStatus', id: 'device_fan_status', label: 'Fan status', documented: false },
+	{ key: 'sobAlive', id: 'device_sob_alive', label: 'SOB alive', documented: false },
+	{ key: 'scalerAlive', id: 'device_scaler_alive', label: 'Scaler alive', documented: false },
+	{ key: 'daisyActive', id: 'device_daisy_active', label: 'Daisy chain active', documented: false },
+	{ key: 'wallLockStatus', id: 'device_wall_lock_status', label: 'Wall lock status', documented: false },
+	{ key: 'usageTime', id: 'device_usage_time', label: 'Usage time', documented: false },
+] as const satisfies ReadonlyArray<{ key: keyof DeviceHealth; id: string; label: string; documented: boolean }>
+
+export type HealthVariableId = (typeof HEALTH_FIELDS)[number]['id']
+
+export type HealthFieldKey = (typeof HEALTH_FIELDS)[number]['key']
+
+/**
+ * The fields the `device_status_field` feedback offers for comparison: exactly the undocumented ones.
+ *
+ * The two documented fields are excluded because each already has a named feedback that states what
+ * it means - `temp` a threshold, which is the right shape for a continuously varying reading, and
+ * `alertDisplay` an enabled/disabled match. Deriving this list from `documented` rather than naming
+ * the exclusions keeps that true: promoting a field to its own feedback means flipping its flag, and
+ * it leaves this list in the same edit.
+ */
+export const HEALTH_COMPARISON_FIELDS = HEALTH_FIELDS.filter((field) => !field.documented)
+
+/** Reads one health field by its `HEALTH_FIELDS` key. */
+export function healthValue(info: DeviceInfo, key: HealthFieldKey): number | undefined {
+	return info.health[key]
+}
+
+/**
  * A one-line summary for the log, listing only the versions the unit actually reported.
  *
  * Skipping the blanks matters: it is how "this firmware does not report `mediator_ver`" stays
@@ -192,6 +306,28 @@ export function formatFirmware(info: DeviceInfo): string {
 	)
 
 	return parts.length ? parts.join(', ') : 'no version strings reported'
+}
+
+/**
+ * Reads a health field that may be a number or a numeric string, returning `undefined` when the key
+ * is absent or unparseable.
+ *
+ * Both forms really occur: `temp` arrives as `"34"` while `fan_status` arrives as `0`, in the same
+ * response. Anything that is neither is dropped rather than coerced - `Number("")` is 0, and a
+ * silent 0 in a temperature feedback is the kind of wrong that looks right.
+ */
+function toOptionalNumber(value: unknown): number | undefined {
+	if (typeof value === 'number') {
+		return Number.isFinite(value) ? value : undefined
+	}
+
+	if (typeof value === 'string' && value.trim() !== '') {
+		const parsed = Number(value)
+
+		return Number.isFinite(parsed) ? parsed : undefined
+	}
+
+	return undefined
 }
 
 function toText(value: unknown): string {
