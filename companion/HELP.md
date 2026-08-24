@@ -67,6 +67,34 @@ the **Refresh Input Signal Status** action updates them on demand.
 Note that no progressive/interlaced suffix is shown (`1080p` vs `1080i`) — the device does not
 report which one it has, so the module does not guess.
 
+## Firmware version and machine identity
+
+The module reads the unit's firmware versions when it connects and publishes them as variables.
+Unlike the signal variables these are **not** polled — the strings cannot change while the unit is
+running — so they are read once per connection, and available in every mode.
+
+| Variable               | Example                        |
+| ---------------------- | ------------------------------ |
+| `$(firmware_cb)`       | `23:12:21:3`                   |
+| `$(firmware_sob)`      | `2023:12:25:1`                 |
+| `$(firmware_scaler)`   | `24.1.2.10`                    |
+| `$(firmware_mediator)` | `23.12.15.01`                  |
+| `$(firmware_web)`      | `24.01.02.104 01`              |
+| `$(firmware_km_mcu)`   | `V0.00.01 12.08.2023`          |
+| `$(firmware_km_usb)`   | `0.2.3 2020-12-02`             |
+| `$(firmware_kernel)`   | `Fri Apr 29 16:42:28 CST 2022` |
+| `$(machine_name)`      | `Sequoia4K60`                  |
+| `$(machine_type)`      | `Sequoia4K60.v1`               |
+| `$(mac_address)`       | `00:23:21:00:1E:A0`            |
+
+The unit reports eight separate version strings and the manual does not explain what each component
+is, so the variables are named after the values the device sends rather than being renamed to a
+guess. A variable is **blank** if your unit's firmware does not report that string — that is not an
+error, and the examples above come from the manual's screenshot rather than from any particular
+unit.
+
+The **Refresh Firmware Version** action re-reads them, though you should not normally need it.
+
 ## Before you use these actions
 
 Two actions change the unit in ways that are not obvious from their names:

@@ -196,18 +196,30 @@ export abstract class SequoiaAdapter {
 	// Documented once for "Sequoia 4K60/4K60L", one request shape per command, so - as in section
 	// 1.3.2 - there is nothing for a subclass to branch on.
 	//
-	// None of the responses below have been captured from hardware. Section 1.3.2's `get` comments
-	// quote real captured payloads because that section was bench-tested; this one has not been, so
-	// the shapes the guide shows only as screenshots are described but not asserted, and the `get`
-	// actions log the reply verbatim rather than picking fields out of it.
+	// The `get` responses below divide by how their shape is known, and the division matters:
+	//
+	// - **Captured from hardware.** Signal Type (1.3.1.2, see `signal.ts`) and Custom Preset File
+	//   List (1.3.1.8, see `system.ts`). These are parsed into variables and pickers because their
+	//   shape is a fact rather than a reading of a screenshot.
+	// - **Decoded from the guide's figures.** Firmware Version (1.3.1.1, see `device-info.ts`),
+	//   Network Info (1.3.1.3) and OSD Info (1.3.1.14). Firmware Version is parsed anyway - its
+	//   fields are all optional and a bad reply degrades to blanks - but nothing here asserts the
+	//   figure is what a given unit answers. Network and OSD Info are still logged verbatim.
+	//
+	// Section 1.3.2's history is the reason for the distinction: guide-faithful and correct came
+	// apart there once already.
 	//
 	// Two of these commands (`setOutputResolution`, `setKmControl`) are also documented in sections
 	// 1.3.4 and 1.3.5 for the 4K60L specifically. They live here rather than on the 4K60L adapter
 	// because 1.3.1 documents them for both machines - see their own comments.
 
 	/**
-	 * Table 1.3.1.1. Reports the MCU / Scaler / Web / KM firmware versions. Response shown in the
-	 * guide only as a screenshot (Figure 1.3.1.1).
+	 * Table 1.3.1.1. Reports the unit's firmware versions - eight strings, not the four the prose's
+	 * "MCU / Scaler / Web / KM" promises. Response shown in the guide only as a screenshot
+	 * (Figure 1.3.1.1); `device-info.ts` transcribes it and parses it into the `firmware_*`
+	 * variables. It has not been captured from hardware.
+	 *
+	 * Also the module's reachability check - `checkConnection()` sends this and reads the reply.
 	 */
 	async getFirmwareVersion(): Promise<AvitechResponse> {
 		return this.api.sendCommand('Info', { func: 'get', type: 'device' })
