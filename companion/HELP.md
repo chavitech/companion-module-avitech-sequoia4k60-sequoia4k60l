@@ -41,8 +41,8 @@ window commands **return `Success` and then do nothing** — the unit reports su
 it never carried out, so neither this module nor any other can detect the failure. Rather than
 offer buttons that appear to work and don't, the module doesn't offer them.
 
-Input signal polling is also switched off in this mode, so the signal variables and feedback below
-will not update. This is why the four available actions are all "set" commands.
+Polling is also switched off in this mode, so the signal and device-status variables and feedbacks
+below will not update. This is why the four available actions are all "set" commands.
 
 ## Input signal status
 
@@ -95,6 +95,48 @@ report that string; that is not an error. The examples above are from a real 4K6
 will differ.
 
 The **Refresh Firmware Version** action re-reads them, though you should not normally need it.
+
+## Device status
+
+Alongside the firmware versions, the module polls a set of live status fields from the device.
+
+| Variable                     | Example         | Meaning                                          |
+| ---------------------------- | --------------- | ------------------------------------------------ |
+| `$(device_temp)`             | `34`            | Temperature — the vendor does not state the unit |
+| `$(device_alert_display)`    | `1`             | Fan/temperature alert display: `1` on, `0` off   |
+| `$(device_fan_status)`       | `0`             | Not documented by the vendor                     |
+| `$(device_sob_alive)`        | `1`             | Not documented by the vendor                     |
+| `$(device_scaler_alive)`     | `1`             | Not documented by the vendor                     |
+| `$(device_daisy_active)`     | `0`             | Not documented by the vendor                     |
+| `$(device_wall_lock_status)` | `0`             | Not documented by the vendor                     |
+| `$(device_usage_time)`       | `0`             | Not documented by the vendor                     |
+| `$(device_ip)`               | `192.168.0.7`   | The unit's own IP                                |
+| `$(device_gateway)`          |                 | The unit's gateway, blank if unset               |
+| `$(device_subnet)`           | `255.255.255.0` | The unit's subnet mask                           |
+
+A variable is **blank** if your unit's firmware does not report that field. Blank is not zero — it
+means the device said nothing, and the feedbacks below treat it that way.
+
+**Feedbacks:**
+
+- **Device temperature above threshold** — turns a button red above a temperature you choose. The
+  manual never states whether the reading is Celsius or Fahrenheit, so watch `$(device_temp)` on a
+  healthy unit and pick a threshold in the same scale.
+- **Alert display setting** — shows whether the unit's fan-failure and temperature alert display is
+  on or off. This is the **setting**, not an alarm: a healthy unit normally reports it enabled. Pair
+  it with the Alert Display action to make one button that shows and toggles the state.
+- **Device status field comparison (advanced)** — compares any of the undocumented fields above
+  against a value.
+
+### Why there is no "fan fault" feedback
+
+The device reports a `fan_status` field, but Avitech's manual does not document it, and a healthy
+unit reports `0`. Nothing establishes whether `0` means "running" or "stopped". A fault feedback
+built on a guess could stay green through a real fan failure, which is worse than having none — so
+the module exposes the raw value and lets you build the rule once you know what your unit does.
+
+If you want to establish it, watch `$(device_fan_status)` on a healthy unit, then obstruct or
+disconnect a fan and see whether the value moves. That result is worth reporting upstream.
 
 ## Before you use these actions
 

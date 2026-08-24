@@ -346,11 +346,19 @@ configured mode must swap the adapter and rebuild the action list.
   and must not be used to size this array; `INPUT_IDS` is separate for that reason.
 
 `ModuleInstance` polls this on a timer whose interval is the `pollInterval` config field (seconds,
-`0` disables). Three properties to preserve:
+`0` disables). **One tick is two reads** — Signal Type and Firmware Version — awaited in sequence,
+not with `Promise.all`: this is a small embedded web server on untested firmware, and two concurrent
+cgi-bin requests per tick is a load pattern nothing has established it handles. One interval drives
+both; a field per read would ask the user to tune something they cannot reason about. Three
+properties to preserve:
 
-- **It does not poll in daisy-chain mode.** §1.3.5 does not list this command, so polling it would
-  be exactly the request the `actions.ts` gating exists to prevent — and §1.3.2's bench results are
-  the warning about what a chained unit's answer is worth.
+- **It does not poll in daisy-chain mode.** §1.3.5 lists neither command, so polling them would be
+  exactly the request the `actions.ts` gating exists to prevent — and §1.3.2's bench results are
+  the warning about what a chained unit's answer is worth. Note this is **narrower than the rule
+  `checkConnection()` follows**, deliberately: that sends Firmware Version once per connect in every
+  mode, because a reachability check has to work everywhere and one request is not a pattern.
+  Repeating it on a timer is. So the health variables and feedbacks simply do not update on a
+  chained unit, and every feedback description says so.
 - **`stopPolling()` runs in `destroy()` and at the top of `configUpdated()`.** Host, interval and
   mode can all change, so the loop is torn down and rebuilt rather than adjusted.
 - **Failures log once, not every tick.** `pollFailing` tracks the transition; an unreachable device
@@ -383,6 +391,47 @@ from the figure; the parser treats every field as optional, which is what makes 
   visible in the log instead of flattening into an empty value that reads like a parse bug.
 - `device-info.ts` imports **only types** from `avitech-api.ts`, so it stays out of the bench's
   forbidden dependency chain.
+
+### Device health variables and feedbacks
+
+The live half of §1.3.1.1 — the fields that change while a unit runs — drives `device_*` variables
+and three feedbacks. **The governing fact is that almost none of it is documented.** Of the eight
+fields, exactly one appears in the guide's text at all.
+
+- **`sob_alarm` is a _setting_, not an alarm.** §1.3.1.22 "Alert Display – Set" defines it as
+  `0 (off) / 1 (on)` for whether the unit displays fan-failure and temperature alerts. The captured
+  4K60L returned `1` — alerts switched on, a healthy configuration. It is modelled as
+  `health.alertDisplay` and surfaced as "Alert display setting" for exactly this reason: a feedback
+  reading it as "the device is alarming" would light on every correctly configured unit. Do not
+  rename it back. (The guide's own Table 1.3.1.22 caption says "Set Active Border Show/Hide
+  Command", which is a copy-paste error — the Function row is the accurate part.)
+- **`fan_status`, `sob_alive`, `scaler_alive`, `daisy_active`, `wall_lock_status` and `usage_time`
+  appear nowhere in the guide.** They were found by capturing the response. On a healthy 4K60L they
+  read `0, 1, 1, 0, 0, 0`. Their values are visible; what a value _means_ is not known.
+
+That is why there is no "Fan fault" feedback. Shipping one means guessing the polarity of
+`fan_status`, and the failure mode of guessing wrong is a button that stays green through an actual
+fan failure. Instead a single `device_status_field` feedback offers the six undocumented fields with
+a comparison and a value, so an operator who has watched their own unit can build the rule the module
+cannot justify. **Promote a field to its own named feedback when a bench result establishes what its
+values mean, not before** — the `documented` flag on `HEALTH_FIELDS` is the switch, and
+`HEALTH_COMPARISON_FIELDS` derives from it so both move in one edit.
+
+Two more properties worth keeping:
+
+- **Absent and zero must not collapse.** A field the unit does not report parses to `undefined` and
+  publishes as `''`, not `0` — on a button, blank reads as "the unit didn't say" where `0` reads as a
+  measurement it never made. The feedbacks return false on `undefined` for every comparison, so
+  "not equal to 0" cannot come out true because the device said nothing.
+- **`temp` arrives as a string** (`"34"`) while `fan_status` arrives as a number (`0`) **in the same
+  response**, so `toOptionalNumber` accepts both. It rejects everything else rather than coercing:
+  `Number('')` is `0`, and a silent zero in a temperature feedback is the kind of wrong that looks
+  right. The unit of measurement is not stated anywhere, which is why the threshold feedback takes
+  the number from the user instead of hard-coding one.
+
+`ip`, `gateway` and `subnet` come from the same read and are published too. They are worth having
+because §1.3.1.3 — the command actually named "Network Info" — _cannot_ tell you which unit you
+addressed: it returns every Sequoia on the subnet with no marker for the one you asked.
 
 ### The `get` shapes still known only from the guide's figures
 

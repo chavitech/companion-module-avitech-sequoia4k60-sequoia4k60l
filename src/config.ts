@@ -5,7 +5,14 @@ export type ModuleConfig = {
 	mode: DeviceMode
 	host: string
 	port: number
-	/** Seconds between "Signal Type - Get" polls. 0 disables polling. See `POLL_INTERVAL_DISABLED`. */
+	/**
+	 * Seconds between polls of "Signal Type - Get" and "Firmware Version - Get". 0 disables polling.
+	 * See `POLL_INTERVAL_DISABLED`.
+	 *
+	 * One interval drives both reads. A separate control for each would be a config field asking the
+	 * user to tune something they have no way to reason about; both reads are ordinary cgi-bin GETs
+	 * of similar cost, so there is nothing to trade off between them.
+	 */
 	pollInterval: number
 }
 
@@ -43,13 +50,13 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 		{
 			type: 'number',
 			id: 'pollInterval',
-			label: 'Signal Poll Interval (seconds)',
+			label: 'Poll Interval (seconds)',
 			width: 6,
 			min: POLL_INTERVAL_DISABLED,
 			max: 3600,
 			default: POLL_INTERVAL_DEFAULT,
 			tooltip:
-				'How often to refresh input signal variables and feedbacks. Set to 0 to disable. Polling is always off in daisy-chain mode, where section 1.3.5 does not list this command.',
+				'How often to refresh the input signal and device status variables and feedbacks. Set to 0 to disable. Polling is always off in daisy-chain mode, where section 1.3.5 does not list these commands.',
 		},
 	]
 }
