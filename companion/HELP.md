@@ -75,23 +75,24 @@ running — so they are read once per connection, and available in every mode.
 
 | Variable               | Example                        |
 | ---------------------- | ------------------------------ |
-| `$(firmware_cb)`       | `23:12:21:3`                   |
-| `$(firmware_sob)`      | `2023:12:25:1`                 |
-| `$(firmware_scaler)`   | `24.1.2.10`                    |
-| `$(firmware_mediator)` | `23.12.15.01`                  |
-| `$(firmware_web)`      | `24.01.02.104 01`              |
-| `$(firmware_km_mcu)`   | `V0.00.01 12.08.2023`          |
-| `$(firmware_km_usb)`   | `0.2.3 2020-12-02`             |
-| `$(firmware_kernel)`   | `Fri Apr 29 16:42:28 CST 2022` |
-| `$(machine_name)`      | `Sequoia4K60`                  |
-| `$(machine_type)`      | `Sequoia4K60.v1`               |
-| `$(mac_address)`       | `00:23:21:00:1E:A0`            |
+| `$(firmware_cb)`       | `26:7:24:13`                   |
+| `$(firmware_sob)`      | `2026:7:24:2`                  |
+| `$(firmware_scaler)`   | `26.7.23.14`                   |
+| `$(firmware_mediator)` | `25.10.30.01`                  |
+| `$(firmware_oip)`      | `2025.6.2.15`                  |
+| `$(firmware_web)`      | `2026.7.23.120 01`             |
+| `$(firmware_km_mcu)`   | `V0.00.01 01.30.2026`          |
+| `$(firmware_km_usb)`   | `0.2.4 2022-10-06`             |
+| `$(firmware_kernel)`   | `Thu Sep 26 16:25:06 CST 2024` |
+| `$(machine_name)`      | `Sequoia4K60L`                 |
+| `$(machine_type)`      | `Sequoia4K60L.v2`              |
+| `$(mac_address)`       | `00:23:21:00:20:90`            |
 
-The unit reports eight separate version strings and the manual does not explain what each component
-is, so the variables are named after the values the device sends rather than being renamed to a
-guess. A variable is **blank** if your unit's firmware does not report that string — that is not an
-error, and the examples above come from the manual's screenshot rather than from any particular
-unit.
+The unit reports up to nine separate version strings and the manual does not explain what each
+component is — it only promises four — so the variables are named after the values the device sends
+rather than being renamed to a guess. A variable is **blank** if your unit's firmware does not
+report that string; that is not an error. The examples above are from a real 4K60L, and your unit
+will differ.
 
 The **Refresh Firmware Version** action re-reads them, though you should not normally need it.
 

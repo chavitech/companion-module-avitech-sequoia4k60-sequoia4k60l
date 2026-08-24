@@ -213,9 +213,50 @@ mode-specific rather than a blanket doubt about §1.3.2, and it is now the stron
   exactly the kind this project has already seen fail. Port 5 (4K60-only, §1.3.1.4) is unexercised.
 - **The 4K60L's other two modes.** Single-View Seamless has never been on a bench at all.
   Daisy chain has, with the negative results above.
-- Firmware Version, Network and OSD Info were recovered from the guide's figures as images
-  (`pdfimages -png -f <page>`) rather than from hardware — see below. **Signal Type (§1.3.1.2) is
-  captured from hardware and implemented.**
+- Network and OSD Info were recovered from the guide's figures as images (`pdfimages -png -f <page>`)
+  rather than from hardware — see below. **Signal Type (§1.3.1.2), Custom Preset File List
+  (§1.3.1.8) and Firmware Version (§1.3.1.1) are captured from hardware and implemented.**
+
+### Firmware Version (§1.3.1.1), captured 2026-08-24
+
+Bench-captured from a 4K60L and cross-checked against the guide's Figure 1.3.1.1 (a 4K60, recovered
+with `pdfimages -png -f 9`). Both payloads are transcribed in full in `src/device-info.ts`.
+
+**Every key the figure shows is present on hardware with the same spelling, the same type and the
+same array length.** This is one of the few shapes in this module where the guide was exactly right
+about what it documented — worth recording precisely because the §1.3.2 findings set the opposite
+expectation.
+
+Where it was wrong is completeness: **hardware returns 51 keys to the figure's 32**, a strict
+superset. The extra 19 are `fan_status`, `ws_total_user`, `ttf`, `daisy_startup_flag`, `daisy_dip`,
+`daisy_slave_mode`, `remote_winid[5]`, `remote_mouse_mode[5]`, `gateway`, `subnet`, `ip_dev_bundle`,
+`ip_dev_bundle_ip`, `oip_ver`, `DH_MASTER`, `ip`, `remote_manager_en`, `change_template`,
+`inp_bit[4]` and `scaler_menu[2]`. **Do not attribute those to either model or firmware** — the two
+units differ on both axes (4K60 on 2022–2024 firmware vs 4K60L on 2026 firmware), so the capture
+cannot separate them.
+
+Four things it settles:
+
+- **A ninth version string exists.** `oip_ver` (`"2025.6.2.15"`) appears nowhere in the guide. It is
+  now a `firmware_oip` variable, blank on a unit that does not report it.
+- **`temp` is a string** (`"34"`, `"45"`), where a number would be expected.
+- **`fading_time` is an array of one** (`[0]`), not a scalar.
+- **The five-wide port arrays are not a 4K60 thing.** `resolution`, `remote_en`, `osd_en`, `audio`
+  and `auto_remote` are five entries long on the **4K60L** too, which has only four HDMI outputs —
+  and `remote_en` came back `[1,1,1,0,1]`, so the fifth slot is not inert padding either. This
+  corrects an earlier guess here that the figure's five entries were explained by it being a 4K60.
+  Anything that later maps these arrays onto ports must not size itself from `capabilities.maxPorts`
+  — the same trap `INPUT_IDS` exists to avoid in `signal.ts`.
+
+**The rest of the payload is live state with no other read path**: the port arrays above, plus
+`sib_hdcp[4]`, `custom_edid[4]`, `force_source_color[4]`, `inp_bit[4]`, `daisy_*`, `idle_time`,
+`fading_time`, `temp`, `fan_status`, `usage_time`, `sob_alive`, `scaler_alive`, `sob_alarm`,
+`wall_lock_status`, `avahi_ip`, `ip`, `gateway`, `subnet`, `udp_port`. That is the next wave of
+variables and the harder half: unlike the version strings it _changes_, so it needs a refresh story
+rather than the read-once one. Two leads for it — Table 1.3.1.1's Function row says "Reference:
+resolution code corresponding table", so `resolution[]` carries the same codes `RESOLUTION_MODES`
+uses for `setOutputResolution`; and `ip`/`gateway`/`subnet` are network facts about _this_ unit,
+which §1.3.1.3 notably cannot give you (it returns every Sequoia on the subnet).
 
 ### Custom Preset File List (§1.3.1.8), captured 2026-08-19
 
@@ -320,11 +361,10 @@ The "Refresh Input Signal Status" action calls `refreshSignalState()` — the sa
 
 ### Firmware version variables (§1.3.1.1)
 
-`src/device-info.ts` parses Figure 1.3.1.1 into the eight `firmware_*` variables plus
-`machine_name`, `machine_type` and `mac_address`. **This shape has never been captured from
-hardware** — it is decoded from the guide's screenshot, and this project's history is that those two
-are different claims. Do not upgrade that statement without a bench capture; the bench already has a
-`get_firmware_version` card, so it is one click away.
+`src/device-info.ts` parses Table 1.3.1.1's reply into the nine `firmware_*` variables plus
+`machine_name`, `machine_type` and `mac_address`. **The shape is bench-confirmed on a 4K60L** — see
+the capture above. The 4K60 has still never answered this command for us, so its reply is known only
+from the figure; the parser treats every field as optional, which is what makes that gap harmless.
 
 - **Read once per connect, never polled.** Stronger than the `customPresets` argument: these strings
   cannot change while the unit is running. They are refreshed wherever the module already sends this
@@ -344,30 +384,14 @@ are different claims. Do not upgrade that statement without a bench capture; the
 - `device-info.ts` imports **only types** from `avitech-api.ts`, so it stays out of the bench's
   forbidden dependency chain.
 
-### The other `get` shapes, decoded from the guide's figures
+### The `get` shapes still known only from the guide's figures
 
 Recovered by extracting the PDF figures as images rather than from hardware, so these are the
-guide's own screenshots — trustworthy about _shape_, not about any particular unit's values.
+guide's own screenshots — trustworthy about _shape_, not about any particular unit's values. Note
+what happened to the third member of this list: Figure 1.3.1.1 was decoded the same way and then
+bench-checked, and the guide turned out to be exactly right about the keys it showed and to be
+missing 19 of the 51 the device actually sends. Read these two as a floor, not a full list.
 
-- **Firmware Version** (`Info`/`device`, Figure 1.3.1.1) — a flat object, transcribed in full in
-  `src/device-info.ts`. Two details the earlier summary of this figure got wrong, both now checked
-  against the extracted image: `temp` is a **string** (`"45"`), and `fading_time` is an **array of
-  one** (`[0]`), not a scalar. Also note the figure is a **4K60** (`machine_name` reads
-  `Sequoia4K60`), which is why the port arrays have five entries — whether a 4K60L answers with the
-  same key set is untested.
-  - **Eight version strings**, not the four Table 1.3.1.1's prose promises ("MCU / Scaler / Web / KM"),
-    and the guide gives no mapping between the two: `cb_firmware`, `sob_firmware`, `scaler_ver`,
-    `mediator_ver`, `web_version`, `km_mcu`, `km_usb`, `kernel`. `cb_` and `sob_` are unexplained
-    anywhere in the guide. The variables are therefore named after the wire keys — a guessed meaning
-    would be baked into a variable id users put on buttons.
-  - **The rest is live state with no other read path**: `resolution[5]`, `audio[5]`, `osd_en[5]`,
-    `remote_en[5]`, `auto_remote[5]`, `sib_hdcp[4]`, `custom_edid[4]`, `force_source_color[4]`,
-    `daisy_chain`, `daisy_audio`, `daisy_active`, `idle_time`, `fading_time`, `temp`, `usage_time`,
-    `sob_alive`, `scaler_alive`, `sob_alarm`, `wall_lock_status`, `avahi_ip`, `udp_port`. That is
-    the next wave of variables, and it is the harder half: unlike the version strings it _changes_,
-    so it needs a refresh story rather than the read-once one below. Table 1.3.1.1's Function row
-    says "Reference: resolution code corresponding table", so `resolution[]` carries the same codes
-    `RESOLUTION_MODES` uses for `setOutputResolution`.
 - **Network** (`Info`/`machinelist`, Figure 1.3.1.3) — an array of
   `{IP, MAC, MACHINE, NAME, AVAHI_IP}`, keys uppercase. Note it lists **every** Sequoia on the
   subnet, not just the addressed one, so nothing may assume element 0 is this instance.
