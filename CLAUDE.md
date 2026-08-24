@@ -318,16 +318,56 @@ configured mode must swap the adapter and rebuild the action list.
 The "Refresh Input Signal Status" action calls `refreshSignalState()` — the same path the poll uses
 — so a manual press and a tick publish identically.
 
+### Firmware version variables (§1.3.1.1)
+
+`src/device-info.ts` parses Figure 1.3.1.1 into the eight `firmware_*` variables plus
+`machine_name`, `machine_type` and `mac_address`. **This shape has never been captured from
+hardware** — it is decoded from the guide's screenshot, and this project's history is that those two
+are different claims. Do not upgrade that statement without a bench capture; the bench already has a
+`get_firmware_version` card, so it is one click away.
+
+- **Read once per connect, never polled.** Stronger than the `customPresets` argument: these strings
+  cannot change while the unit is running. They are refreshed wherever the module already sends this
+  command, plus on demand from "Refresh Firmware Version".
+- **`checkConnection()` parses the reply it used to discard.** No new request — this is the same
+  command the module has always sent to prove the unit is reachable. That is what keeps it clear of
+  §1.3.5's closed list: reading a reply already in hand is not the same act as sending a command the
+  guide does not list for daisy chain. The firmware variables are therefore populated in every mode,
+  including daisy chain, where the values are as trustworthy as the connection check itself.
+- **A failed connect clears them** rather than leaving them. After a host change the previous values
+  describe a different machine.
+- **Every field is optional in the parser** and a non-object reply degrades to blanks. Figure 1.2.6
+  documents `null` and `{ }` as real answers when there is no data, so an empty object is a shape
+  the device produces and not a malformed reply.
+- **`formatFirmware()` skips the blanks**, so "this firmware does not report `mediator_ver`" stays
+  visible in the log instead of flattening into an empty value that reads like a parse bug.
+- `device-info.ts` imports **only types** from `avitech-api.ts`, so it stays out of the bench's
+  forbidden dependency chain.
+
 ### The other `get` shapes, decoded from the guide's figures
 
 Recovered by extracting the PDF figures as images rather than from hardware, so these are the
 guide's own screenshots — trustworthy about _shape_, not about any particular unit's values.
 
-- **Firmware Version** (`Info`/`device`, Figure 1.3.1.1) — a flat object. Beyond the version
-  strings it carries live state with no other read path: `resolution[5]`, `audio[5]`, `osd_en[5]`,
-  `remote_en[5]`, `sib_hdcp[4]`, `custom_edid[4]`, `daisy_chain`, `daisy_audio`, `daisy_active`,
-  `idle_time`, `fading_time`, `temp`, `machine_name`, `wall_lock_status`. This is the obvious
-  source for a second wave of variables, and `checkConnection()` already sends it.
+- **Firmware Version** (`Info`/`device`, Figure 1.3.1.1) — a flat object, transcribed in full in
+  `src/device-info.ts`. Two details the earlier summary of this figure got wrong, both now checked
+  against the extracted image: `temp` is a **string** (`"45"`), and `fading_time` is an **array of
+  one** (`[0]`), not a scalar. Also note the figure is a **4K60** (`machine_name` reads
+  `Sequoia4K60`), which is why the port arrays have five entries — whether a 4K60L answers with the
+  same key set is untested.
+  - **Eight version strings**, not the four Table 1.3.1.1's prose promises ("MCU / Scaler / Web / KM"),
+    and the guide gives no mapping between the two: `cb_firmware`, `sob_firmware`, `scaler_ver`,
+    `mediator_ver`, `web_version`, `km_mcu`, `km_usb`, `kernel`. `cb_` and `sob_` are unexplained
+    anywhere in the guide. The variables are therefore named after the wire keys — a guessed meaning
+    would be baked into a variable id users put on buttons.
+  - **The rest is live state with no other read path**: `resolution[5]`, `audio[5]`, `osd_en[5]`,
+    `remote_en[5]`, `auto_remote[5]`, `sib_hdcp[4]`, `custom_edid[4]`, `force_source_color[4]`,
+    `daisy_chain`, `daisy_audio`, `daisy_active`, `idle_time`, `fading_time`, `temp`, `usage_time`,
+    `sob_alive`, `scaler_alive`, `sob_alarm`, `wall_lock_status`, `avahi_ip`, `udp_port`. That is
+    the next wave of variables, and it is the harder half: unlike the version strings it _changes_,
+    so it needs a refresh story rather than the read-once one below. Table 1.3.1.1's Function row
+    says "Reference: resolution code corresponding table", so `resolution[]` carries the same codes
+    `RESOLUTION_MODES` uses for `setOutputResolution`.
 - **Network** (`Info`/`machinelist`, Figure 1.3.1.3) — an array of
   `{IP, MAC, MACHINE, NAME, AVAHI_IP}`, keys uppercase. Note it lists **every** Sequoia on the
   subnet, not just the addressed one, so nothing may assume element 0 is this instance.

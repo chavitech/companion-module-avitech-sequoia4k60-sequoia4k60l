@@ -3,6 +3,7 @@ import type ModuleInstance from './main.js'
 import { Sequoia4K60LAdapter } from './adapters/index.js'
 import { RESOLUTION_MODES } from './resolutions.js'
 import { formatSignal } from './signal.js'
+import { formatFirmware } from './device-info.js'
 import {
 	ASPECT_CHOICES,
 	FULLSCREEN_CHOICES,
@@ -668,11 +669,12 @@ export function UpdateActions(self: ModuleInstance): void {
 		supportsSystemCommands
 			? {
 					name: 'Refresh Firmware Version',
+					description:
+						'Updates the firmware version and machine identity variables. These are also read whenever the connection is established, and they do not change while the unit is running, so this is rarely needed.',
 					options: [],
 					callback: async () => {
 						try {
-							const result = await self.adapter.getFirmwareVersion()
-							self.log('info', `Firmware version: ${JSON.stringify(result)}`)
+							self.log('info', `Firmware version: ${formatFirmware(await self.refreshDeviceInfo())}`)
 						} catch (error) {
 							self.log('error', `Refresh Firmware Version failed: ${(error as Error).message}`)
 						}

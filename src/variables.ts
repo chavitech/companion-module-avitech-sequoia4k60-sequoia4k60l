@@ -1,11 +1,18 @@
 import type { CompanionVariableDefinitions } from '@companion-module/base'
 import type ModuleInstance from './main.js'
 import { INPUT_IDS, formatSignal, type InputId, type InputSignal } from './signal.js'
+import { FIRMWARE_FIELDS, type DeviceInfo, type FirmwareVariableId } from './device-info.js'
 
 /**
- * Variables published from "Signal Type - Get" (Table 1.3.1.2), refreshed by the poll loop in
- * `ModuleInstance`. See `signal.ts` for what the device actually reports and why only these fields
- * are exposed.
+ * The module's variables, published from two reads with two different refresh stories.
+ *
+ * - "Signal Type - Get" (Table 1.3.1.2) is live per-input state, refreshed by the poll loop in
+ *   `ModuleInstance`. See `signal.ts` for what the device actually reports and why only these
+ *   fields are exposed.
+ * - "Firmware Version - Get" (Table 1.3.1.1) is version and identity strings that do not change
+ *   while a unit runs, so they are read once per connect and never polled. See `device-info.ts`,
+ *   and note its warning that this response's shape comes from the guide's figure rather than from
+ *   hardware.
  */
 export type VariablesSchema = {
 	[K in `input_${InputId}_signal`]: string
@@ -14,6 +21,13 @@ export type VariablesSchema = {
 } & {
 	/** How many of the four inputs currently report a signal. */
 	inputs_present: number
+} & {
+	[K in FirmwareVariableId]: string
+} & {
+	/** Identity fields from "Firmware Version - Get" (Table 1.3.1.1). See `device-info.ts`. */
+	machine_name: string
+	machine_type: string
+	mac_address: string
 }
 
 export function UpdateVariableDefinitions(self: ModuleInstance): void {
@@ -27,6 +41,14 @@ export function UpdateVariableDefinitions(self: ModuleInstance): void {
 	}
 
 	definitions.inputs_present = { name: 'Number of inputs with a signal' }
+
+	for (const field of FIRMWARE_FIELDS) {
+		definitions[field.id] = { name: `${field.label} firmware version` }
+	}
+
+	definitions.machine_name = { name: 'Machine name reported by the device' }
+	definitions.machine_type = { name: 'Machine type reported by the device' }
+	definitions.mac_address = { name: 'MAC address reported by the device' }
 
 	self.setVariableDefinitions(definitions)
 }
@@ -47,6 +69,27 @@ export function SignalVariableValues(signals: InputSignal[]): Partial<VariablesS
 	}
 
 	values.inputs_present = signals.filter((signal) => signal.present).length
+
+	return values
+}
+
+/**
+ * Maps the parsed device info onto variable values.
+ *
+ * Every field is always written, including the empty ones, for the same reason `SignalVariableValues`
+ * writes absent inputs: a device that stops reporting a version string should clear it rather than
+ * leave the previous unit's value on a button after the host is repointed.
+ */
+export function DeviceInfoVariableValues(info: DeviceInfo): Partial<VariablesSchema> {
+	const values: Partial<VariablesSchema> = {}
+
+	for (const field of FIRMWARE_FIELDS) {
+		values[field.id] = info.firmware[field.key]
+	}
+
+	values.machine_name = info.machineName
+	values.machine_type = info.machineType
+	values.mac_address = info.macAddress
 
 	return values
 }

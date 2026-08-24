@@ -1,6 +1,11 @@
 import { InstanceBase, InstanceStatus, type SomeCompanionConfigField } from '@companion-module/base'
 import { GetConfigFields, POLL_INTERVAL_DEFAULT, POLL_INTERVAL_DISABLED, type ModuleConfig } from './config.js'
-import { SignalVariableValues, UpdateVariableDefinitions, type VariablesSchema } from './variables.js'
+import {
+	DeviceInfoVariableValues,
+	SignalVariableValues,
+	UpdateVariableDefinitions,
+	type VariablesSchema,
+} from './variables.js'
 import { UpgradeScripts } from './upgrades.js'
 import { UpdateActions, type ActionsSchema } from './actions.js'
 import { SIGNAL_FEEDBACK_ID, UpdateFeedbacks, type FeedbacksSchema } from './feedbacks.js'
@@ -9,6 +14,7 @@ import { AvitechHttpApi } from './avitech-api.js'
 import { createAdapter, type SequoiaAdapter } from './adapters/index.js'
 import { emptySignals, parseSignalResponse, type InputSignal } from './signal.js'
 import { parseCustomPresetList } from './system.js'
+import { emptyDeviceInfo, formatFirmware, parseDeviceInfo, type DeviceInfo } from './device-info.js'
 
 export type ModuleSchema = {
 	config: ModuleConfig
@@ -44,6 +50,17 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	 */
 	customPresets: string[] = []
 
+	/**
+	 * Latest parsed "Firmware Version - Get" state (Table 1.3.1.1), published as the `firmware_*`,
+	 * `machine_*` and `mac_address` variables.
+	 *
+	 * Not polled, and for a stronger reason than `customPresets`: these strings cannot change while
+	 * the unit is running. They are refreshed wherever the module already sends this command -
+	 * `checkConnection()` on every init and config change - plus on demand from the "Refresh
+	 * Firmware Version" action.
+	 */
+	deviceInfo: DeviceInfo = emptyDeviceInfo()
+
 	constructor(internal: unknown) {
 		super(internal)
 	}
@@ -58,6 +75,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.updatePresets() // export Presets
 		this.updateVariableDefinitions() // export variable definitions
 		this.publishSignalState() // seed the variables so they read "No signal" rather than being undefined
+		this.publishDeviceInfo() // seed the firmware variables blank; checkConnection() fills them in below
 
 		await this.checkConnection()
 		await this.refreshCustomPresets()
@@ -103,6 +121,18 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		} catch (error) {
 			this.log('debug', `Could not read the custom preset list: ${(error as Error).message}`)
 		}
+	}
+
+	/**
+	 * Reads "Firmware Version - Get" once and republishes the version and identity variables from it.
+	 * Throws if the request fails; `checkConnection()` and the refresh action each handle that in
+	 * their own way.
+	 */
+	async refreshDeviceInfo(): Promise<DeviceInfo> {
+		this.deviceInfo = parseDeviceInfo(await this.adapter.getFirmwareVersion())
+		this.publishDeviceInfo()
+
+		return this.deviceInfo
 	}
 
 	/** Latest known state for one input, or undefined if `input` is not one of the four. */
@@ -185,12 +215,28 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		}
 	}
 
+	private publishDeviceInfo(): void {
+		this.setVariableValues(DeviceInfoVariableValues(this.deviceInfo))
+	}
+
 	private publishSignalState(): void {
 		this.setVariableValues(SignalVariableValues(this.signals))
 		this.checkFeedbacks(SIGNAL_FEEDBACK_ID)
 	}
 
-	/** Confirms the device is reachable using the Firmware Version - Get command, and updates connection status. */
+	/**
+	 * Confirms the device is reachable using the Firmware Version - Get command, and updates
+	 * connection status.
+	 *
+	 * The reply is now parsed into the firmware variables instead of being discarded. That adds no
+	 * request - this is the same command the module has always sent to prove the unit is there - so
+	 * it does not widen what is sent in daisy-chain mode, where section 1.3.5's closed list would
+	 * otherwise argue against asking. Reading a reply already in hand is not the same act as
+	 * sending a command the guide does not list for the mode.
+	 *
+	 * A failure here clears the variables rather than leaving them: the previous values described
+	 * whichever unit answered last, and after a host change that is a different machine.
+	 */
 	private async checkConnection(): Promise<void> {
 		if (!this.config.host) {
 			this.updateStatus(InstanceStatus.BadConfig, 'Target IP is not configured')
@@ -200,8 +246,10 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.updateStatus(InstanceStatus.Connecting)
 
 		try {
-			await this.api.sendCommand('Info', { func: 'get', type: 'device' })
+			this.log('debug', `Firmware: ${formatFirmware(await this.refreshDeviceInfo())}`)
 		} catch (error) {
+			this.deviceInfo = emptyDeviceInfo()
+			this.publishDeviceInfo()
 			this.log('error', `Failed to connect to ${this.config.host}: ${(error as Error).message}`)
 		}
 	}
