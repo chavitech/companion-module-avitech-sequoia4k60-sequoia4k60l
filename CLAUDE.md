@@ -91,6 +91,51 @@ Two things the bench does that Companion does not:
   confirmation. Unlike Companion — where a button has to be deliberately created and the action
   assigned to it — one click on the bench page is the whole gesture.
 
+### Testing in a real Companion (`yarn deploy`)
+
+The bench proves a _command_ works; only Companion proves the _module_ works. Companion loads
+"developer modules" from a folder configured in its launcher settings, one subfolder per module.
+
+```bash
+yarn deploy --to /mnt/c/Testing/development/companion-module-avitech-sequoia4k60-sequoia4k60l
+```
+
+`yarn deploy` builds first, then rsyncs. **It must build first** — Companion runs `dist/main.js` per
+the manifest entrypoint and never looks at the TypeScript, so deploying a stale `dist/` is the most
+likely way to be confused by this script. The folder name is free; Companion identifies a module by
+the `id` in its `companion/manifest.json`, not by the directory.
+
+**Why a copy and not a symlink.** Companion runs on Windows here, the repo lives on WSL2's ext4, and
+nothing bridges them:
+
+- Windows refuses `mklink /D` to a UNC target, so there is no Windows-side link into WSL.
+- Pointing the dev-modules path straight at `\\wsl.localhost\...` fails on **Companion 5.0.1**,
+  whose loader builds the import URL by string concatenation:
+
+  ```js
+  var DI = (e) => (process.platform === 'win32' && !e.startsWith('file://') ? `file://${e}` : e)
+  ```
+
+  A drive path limps through that; a UNC path becomes `file://\\host\share\...`, not a valid
+  absolute file URL. The module dies with `ERR_INVALID_FILE_URL_PATH` during registration, which
+  Companion surfaces as **"Failed to init: Error: Call timed out"** — a message that points at the
+  module's `init()` and is entirely misleading. `pathToFileURL(e).href` handles both forms. If that
+  is fixed upstream this script stops being necessary.
+
+Windows Node _can_ otherwise read and import across the WSL share — that was measured, not assumed —
+so the loader's URL handling is the whole obstacle.
+
+Two consequences of it being a copy:
+
+- **No hot reload.** WSL2's inotify events do not reach Windows file watchers, so Companion cannot
+  notice a rebuild. Run `yarn deploy`, then restart the connection in Companion.
+- **The first copy is slow** — ~87MB of `node_modules` over DrvFs. Later ones move only the changed
+  files in `dist/`, which is why this is rsync rather than a plain copy.
+
+`tools/deploy.mjs` runs rsync with `--delete`, so a mistyped destination would empty a directory
+rather than merely add to one. It refuses an unset target, `/`, a target whose parent does not exist,
+and the repo itself. Keep those checks.
+
 ## Model / mode design
 
 The single most important concept in this module. Read before touching `actions.ts` or the

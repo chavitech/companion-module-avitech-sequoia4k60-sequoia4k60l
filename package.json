@@ -10,6 +10,7 @@
 		"build": "rimraf dist && run build:main",
 		"build:main": "tsc -p tsconfig.build.json",
 		"dev": "tsc -p tsconfig.build.json --watch",
+		"deploy": "run build && node tools/deploy.mjs",
 		"bench": "run build && node tools/bench.mjs",
 		"lint:raw": "eslint",
 		"lint": "run lint:raw ."
