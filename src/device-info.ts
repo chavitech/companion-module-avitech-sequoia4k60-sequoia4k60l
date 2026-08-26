@@ -116,9 +116,12 @@ export interface DeviceHealth {
 	/**
 	 * `temp`, parsed from the string the device sends (`"34"`, `"45"`).
 	 *
-	 * Units are not stated anywhere in the guide. The two readings seen are consistent with Celsius
-	 * and the alert this pairs with is a "temperature alert", but nothing asserts that here - the
+	 * Units are not stated anywhere in the guide. The readings seen are consistent with Celsius and
+	 * the alert this pairs with is a "temperature alert", but nothing asserts that here - the
 	 * `device_temp_above` feedback takes a threshold from the user, so it is correct either way.
+	 *
+	 * It is a live reading but a **slow** one: 34 on 2026-08-24, 33 on 2026-08-26, and unchanged
+	 * across 20 samples over 7 minutes. It moves on a timescale of hours, not seconds.
 	 */
 	temp?: number
 	/**
@@ -129,7 +132,16 @@ export interface DeviceHealth {
 	fanStatus?: number
 	/** `sob_alive`. **Undocumented.** Read 1 on both the figure's 4K60 and the captured 4K60L. */
 	sobAlive?: number
-	/** `scaler_alive`. **Undocumented.** Read 1 on both. */
+	/**
+	 * `scaler_alive`. **Undocumented, and demonstrably not constant.** It read 1 in the guide's
+	 * figure and in the 2026-08-24 capture, and 0 across 20 samples over 7 minutes on 2026-08-26 -
+	 * same unit, working normally in quad-bypass both times, with Companion driving it.
+	 *
+	 * So it is real state that changes on a timescale of days, and its name is a trap: a feedback
+	 * reading `scaler_alive === 0` as "the scaler is dead" would have been firing continuously on a
+	 * perfectly healthy machine. This is the concrete reason the undocumented fields get one generic
+	 * comparison feedback instead of six named ones.
+	 */
 	scalerAlive?: number
 	/** `daisy_active`. **Undocumented.** Read 0 on both, neither of which was daisy-chained. */
 	daisyActive?: number
@@ -143,7 +155,10 @@ export interface DeviceHealth {
 	alertDisplay?: number
 	/** `wall_lock_status`. **Undocumented.** Read 0 on both. */
 	wallLockStatus?: number
-	/** `usage_time`. **Undocumented.** Read 0 on both, which is odd for a running unit. */
+	/**
+	 * `usage_time`. **Undocumented.** Read 0 in the figure, in the 2026-08-24 capture, and across 20
+	 * samples over 7 minutes on 2026-08-26. Whatever it counts, it is not uptime.
+	 */
 	usageTime?: number
 }
 

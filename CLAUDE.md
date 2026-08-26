@@ -437,6 +437,25 @@ from the figure; the parser treats every field as optional, which is what makes 
 - `device-info.ts` imports **only types** from `avitech-api.ts`, so it stays out of the bench's
   forbidden dependency chain.
 
+### Device health polling, bench-tested 2026-08-26
+
+Run against the 4K60L at 192.168.0.7 in **Quad Multiview + Bypass**, ~10 minutes at the default
+2-second interval, in a real Companion 5.0.1. Variables and feedbacks updated throughout.
+
+- **The doubled request rate is fine.** A tick is now two cgi-bin GETs rather than one, so at the
+  default interval the unit fields a request per second. This was the main open risk in adding
+  §1.3.1.1 to the poll loop — an embedded web server on firmware that is not regression tested — and
+  it held for the duration with no errors and no `Device polling failed` transition.
+- **§1.3.1.1 works as a _polled_ read, not only a connect-time one.** The guide documents the command
+  without saying anything about repeat calls, so this was an assumption until now.
+- **The health fields barely move.** Sampled directly every 20 seconds for 7 minutes, `temp`,
+  `fan_status`, `sob_alive`, `scaler_alive`, `wall_lock_status` and `usage_time` were all constant;
+  `temp` shifted by one degree over two _days_. Only `scaler_alive` differed between captures at all.
+  Polling this at the same 2-second rate as the signal read is therefore mostly wasted requests —
+  **a fraction-of-the-tick refresh for the device-info read is the obvious refinement**, and the
+  measurement above is the justification for it. Deliberately not done yet: the current rate is
+  proven to work, and this is a change that wants its own bench pass.
+
 ### Device health variables and feedbacks
 
 The live half of §1.3.1.1 — the fields that change while a unit runs — drives `device_*` variables
@@ -451,8 +470,14 @@ fields, exactly one appears in the guide's text at all.
   rename it back. (The guide's own Table 1.3.1.22 caption says "Set Active Border Show/Hide
   Command", which is a copy-paste error — the Function row is the accurate part.)
 - **`fan_status`, `sob_alive`, `scaler_alive`, `daisy_active`, `wall_lock_status` and `usage_time`
-  appear nowhere in the guide.** They were found by capturing the response. On a healthy 4K60L they
-  read `0, 1, 1, 0, 0, 0`. Their values are visible; what a value _means_ is not known.
+  appear nowhere in the guide.** They were found by capturing the response. Their values are
+  visible; what a value _means_ is not known.
+
+  **`scaler_alive` is the proof that this caution is not theoretical.** It read `1` in the guide's
+  figure and in the 2026-08-24 capture, and `0` across 20 samples over 7 minutes on 2026-08-26 — the
+  same 4K60L, working normally in quad-bypass both times, with Companion driving it. A "Scaler not
+  alive" feedback would therefore have been firing continuously on a perfectly healthy machine.
+  Do not name these fields on the strength of what they are called.
 
 That is why there is no "Fan fault" feedback. Shipping one means guessing the polarity of
 `fan_status`, and the failure mode of guessing wrong is a button that stays green through an actual
