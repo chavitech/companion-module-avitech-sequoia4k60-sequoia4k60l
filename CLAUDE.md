@@ -474,9 +474,25 @@ rate from ~1 req/s back to ~0.53. Four properties to preserve:
 - **`pollInterval` stays one field.** It is the signal read's interval; the fraction is the module's
   to derive from its own measurements, not a second number for the user to reason about.
 
-**Not yet bench-tested.** The 2026-08-26 pass proves the _old_ rate works, and this only lowers it,
-so the risk is not the device — it is whether the health variables and feedbacks still update on a
-running unit at the slower cadence. Confirm that in a real Companion before treating it as verified.
+**Bench-tested in a real Companion on 2026-08-31**, against the 4K60L in Quad Multiview + Bypass.
+The risk here was never the device — the 2026-08-26 pass proves the higher rate works and this only
+lowers it — but whether the health variables and feedbacks still update at the slower cadence, or
+quietly freeze. They update.
+
+- **The signal side is unmeasurably changed.** Input variables still follow a re-plug within the
+  configured interval, which is the control for the whole test.
+- **`device_alert_display` tracked the Alert Display action**, averaging ~10s to surface. That is
+  the shape a 30-second period produces: a change at an arbitrary moment lands uniformly across the
+  window, so the mean is what varies with sampling and the _bound_ is the property being checked.
+  This is the test worth repeating, because it is the only health field that can be changed on
+  demand — `temp` moved one degree in two days, so watching it proves nothing either way.
+- **The log shows the derived ratio directly**: 15 signal reads per device read at the default
+  2-second interval, and 2:1 after switching to 20 seconds. The second of those is the overshoot
+  path — 20s does not divide 30s, so the read lands every 40 seconds rather than every 30.
+- **`configUpdated()` rebuilds the cadence**, confirmed by that ratio changing on an interval edit
+  without a reconnect.
+- **Connect-time behaviour is unchanged**: the firmware variables populate immediately, from
+  `checkConnection()` rather than from the loop.
 
 ### Device health variables and feedbacks
 
