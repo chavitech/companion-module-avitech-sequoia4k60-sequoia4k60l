@@ -15,10 +15,10 @@ import {
  * - "Signal Type - Get" (Table 1.3.1.2) is live per-input state, refreshed by the poll loop in
  *   `ModuleInstance`. See `signal.ts` for what the device actually reports and why only these
  *   fields are exposed.
- * - "Firmware Version - Get" (Table 1.3.1.1) is version and identity strings that do not change
- *   while a unit runs, so they are read once per connect and never polled. See `device-info.ts`,
- *   and note its warning that this response's shape comes from the guide's figure rather than from
- *   hardware.
+ * - "Firmware Version - Get" (Table 1.3.1.1) is two things behind one request: version and identity
+ *   strings that cannot change while a unit runs, and the health fields that can. It is read at
+ *   connect and then on a fraction of the poll ticks - see `deviceInfoEveryTicks()` for why it does
+ *   not ride every one. See `device-info.ts` for the shape.
  */
 export type VariablesSchema = {
 	[K in `input_${InputId}_signal`]: string
@@ -31,9 +31,9 @@ export type VariablesSchema = {
 	[K in FirmwareVariableId]: string
 } & {
 	/**
-	 * The live half of Table 1.3.1.1, refreshed by the poll loop. Numbers, except that a field the
-	 * unit does not report reads as an empty string rather than as `0` - see `device-info.ts` on why
-	 * absent and zero must not collapse together.
+	 * The live half of Table 1.3.1.1, refreshed by the poll loop at its own slower cadence. Numbers,
+	 * except that a field the unit does not report reads as an empty string rather than as `0` - see
+	 * `device-info.ts` on why absent and zero must not collapse together.
 	 */
 	[K in HealthVariableId]: number | string
 } & {

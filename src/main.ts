@@ -1,5 +1,11 @@
 import { InstanceBase, InstanceStatus, type SomeCompanionConfigField } from '@companion-module/base'
-import { GetConfigFields, POLL_INTERVAL_DEFAULT, POLL_INTERVAL_DISABLED, type ModuleConfig } from './config.js'
+import {
+	GetConfigFields,
+	POLL_INTERVAL_DEFAULT,
+	POLL_INTERVAL_DISABLED,
+	deviceInfoEveryTicks,
+	type ModuleConfig,
+} from './config.js'
 import {
 	DeviceInfoVariableValues,
 	SignalVariableValues,
@@ -38,6 +44,17 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	private pollInFlight = false
 	/** Set once a poll has failed, so a device going away logs once instead of every interval. */
 	private pollFailing = false
+	/**
+	 * How many ticks apart the device-info read runs, and how many have passed since it last did.
+	 *
+	 * The two reads on this loop are not equally urgent - see `deviceInfoEveryTicks()` for the
+	 * measurement - so the device-info read rides the signal read's timer at a fraction of its rate
+	 * rather than getting a timer of its own. That is what keeps the module's promise never to have
+	 * two cgi-bin requests in flight at once: a second timer could fire while this one is mid-tick,
+	 * and nothing has established that the device tolerates it.
+	 */
+	private deviceInfoTicks = 1
+	private ticksSinceDeviceInfo = 0
 
 	/**
 	 * Custom preset filenames from the device (Table 1.3.1.8), newest first, feeding the Load and
@@ -56,7 +73,10 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	 * Two halves with different lifetimes behind one read. The version and identity strings cannot
 	 * change while the unit runs; `health` can, which is why this joined the poll loop rather than
 	 * staying the connect-time read it started as. One request serves both - the device has no
-	 * narrower command - so polling the health fields costs nothing extra beyond the tick itself.
+	 * narrower command - so the version strings are re-read along with the health fields.
+	 *
+	 * It runs at a fraction of the poll rate, not on every tick: the health fields move far more
+	 * slowly than the signal state does. See `deviceInfoEveryTicks()`.
 	 */
 	deviceInfo: DeviceInfo = emptyDeviceInfo()
 
@@ -123,11 +143,16 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	}
 
 	/**
-	 * Reads "Firmware Version - Get" once and republishes the version and identity variables from it.
-	 * Throws if the request fails; `checkConnection()` and the refresh action each handle that in
-	 * their own way.
+	 * Reads "Firmware Version - Get" once and republishes the version, identity and health variables
+	 * from it. Throws if the request fails; `checkConnection()`, the poll loop and the refresh action
+	 * each handle that in their own way.
+	 *
+	 * Every caller counts against the poll loop's cadence, so a manual "Refresh Firmware Version"
+	 * postpones the next polled read by a full period rather than being followed by one moments
+	 * later. The counter means "ticks since this response was last read", whoever asked for it.
 	 */
 	async refreshDeviceInfo(): Promise<DeviceInfo> {
+		this.ticksSinceDeviceInfo = 0
 		this.deviceInfo = parseDeviceInfo(await this.adapter.getFirmwareVersion())
 		this.publishDeviceInfo()
 
@@ -152,8 +177,8 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	}
 
 	/**
-	 * Starts the poll loop - "Signal Type - Get" and "Firmware Version - Get" - unless it is switched
-	 * off or not applicable.
+	 * Starts the poll loop - "Signal Type - Get" every tick and "Firmware Version - Get" every
+	 * `deviceInfoTicks` ticks - unless it is switched off or not applicable.
 	 *
 	 * Not applicable in daisy-chain mode: section 1.3.5 names the only four commands assumed to work
 	 * on a chained unit and neither of these is one of them, so polling them would be exactly the
@@ -180,6 +205,12 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			return
 		}
 
+		this.deviceInfoTicks = deviceInfoEveryTicks(intervalSeconds)
+		// Due on the first tick. `checkConnection()` has usually just read this, but `startPolling()`
+		// does not get to assume that about its caller, and one extra request at connect time is not
+		// the rate this exists to bring down.
+		this.ticksSinceDeviceInfo = this.deviceInfoTicks
+
 		this.pollTimer = setInterval(() => void this.pollDevice(), intervalSeconds * 1000)
 		void this.pollDevice() // don't make the first values wait a whole interval
 	}
@@ -192,14 +223,15 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 
 		this.pollInFlight = false
 		this.pollFailing = false
+		this.ticksSinceDeviceInfo = 0
 	}
 
 	/**
-	 * One tick: the signal read and the device-info read, in that order.
+	 * One tick: the signal read, then the device-info read on the ticks it is due.
 	 *
-	 * They are awaited in sequence rather than with `Promise.all` on purpose. This is a small
-	 * embedded web server on a device whose firmware is not regression tested, and two concurrent
-	 * cgi-bin requests every tick is a load pattern nothing here has established it handles. In
+	 * When both run they are awaited in sequence rather than with `Promise.all` on purpose. This is a
+	 * small embedded web server on a device whose firmware is not regression tested, and two
+	 * concurrent cgi-bin requests is a load pattern nothing here has established it handles. In
 	 * sequence the tick is two ordinary requests, which is what the module already does everywhere
 	 * else.
 	 *
@@ -215,7 +247,16 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 
 		try {
 			await this.refreshSignalState()
-			await this.refreshDeviceInfo()
+
+			if (this.ticksSinceDeviceInfo >= this.deviceInfoTicks) {
+				// The attempt is what counts, not the outcome: the counter is reset by
+				// `refreshDeviceInfo()` before the request can fail, so a unit that answers the
+				// signal read and refuses this one is asked again at the same slow cadence rather
+				// than on every tick.
+				await this.refreshDeviceInfo()
+			} else {
+				this.ticksSinceDeviceInfo++
+			}
 
 			if (this.pollFailing) {
 				this.log('info', 'Device polling recovered')
