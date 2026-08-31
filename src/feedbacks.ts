@@ -2,14 +2,18 @@ import { combineRgb } from '@companion-module/base'
 import type ModuleInstance from './main.js'
 import { INPUT_CHOICES, INPUT_IDS } from './signal.js'
 import { HEALTH_COMPARISON_FIELDS, type HealthFieldKey } from './device-info.js'
+import { DEVICE_INFO_REFRESH_SECONDS } from './config.js'
 
 /**
  * Feedbacks driven by the two polled reads: "Signal Type - Get" (Table 1.3.1.2) and the live half of
  * "Firmware Version - Get" (Table 1.3.1.1).
  *
- * All of them are only as live as `pollInterval`, and none of them update in daisy-chain mode, where
- * the module does not poll at all. See `ModuleInstance.startPolling()`. Every description below says
- * so, because a feedback that silently stops updating is worse than one that is absent.
+ * The signal feedback is as live as `pollInterval`; the three device ones are only as live as
+ * `DEVICE_INFO_REFRESH_SECONDS`, since that read rides only a fraction of the ticks. None of them
+ * update in daisy-chain mode, where the module does not poll at all. See
+ * `ModuleInstance.startPolling()`. Every description below says so, because a feedback that silently
+ * stops updating is worse than one that is absent - and one that refreshes more slowly than the
+ * configured interval would otherwise read as a stuck value.
  */
 export type FeedbacksSchema = {
 	input_signal_present: {
@@ -101,8 +105,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 		 */
 		device_temp_above: {
 			name: 'Device temperature above threshold',
-			description:
-				'True while the temperature the device reports is above the threshold. The vendor does not document the unit of measurement, so set the threshold by watching $(device_temp) on a healthy unit. Requires polling to be enabled.',
+			description: `True while the temperature the device reports is above the threshold. The vendor does not document the unit of measurement, so set the threshold by watching $(device_temp) on a healthy unit. Requires polling to be enabled; device status is refreshed roughly every ${DEVICE_INFO_REFRESH_SECONDS} seconds rather than on every poll.`,
 			type: 'boolean',
 			defaultStyle: {
 				bgcolor: combineRgb(160, 0, 0),
@@ -136,8 +139,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 		 */
 		device_alert_display: {
 			name: 'Alert display setting',
-			description:
-				"True while the device's fan-failure and temperature alert display is set to the selected state (section 1.3.1.22). This is the setting, not an active alarm - a healthy unit normally reports it enabled. Requires polling to be enabled.",
+			description: `True while the device's fan-failure and temperature alert display is set to the selected state (section 1.3.1.22). This is the setting, not an active alarm - a healthy unit normally reports it enabled. Requires polling to be enabled; device status is refreshed roughly every ${DEVICE_INFO_REFRESH_SECONDS} seconds rather than on every poll.`,
 			type: 'boolean',
 			defaultStyle: {
 				bgcolor: combineRgb(0, 0, 128),
@@ -175,8 +177,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 		 */
 		device_status_field: {
 			name: 'Device status field comparison (advanced)',
-			description:
-				'Compares a raw status field from the device against a value. The vendor does not document what these fields mean, so watch the matching variable on a healthy unit before relying on one. Requires polling to be enabled.',
+			description: `Compares a raw status field from the device against a value. The vendor does not document what these fields mean, so watch the matching variable on a healthy unit before relying on one. Requires polling to be enabled; device status is refreshed roughly every ${DEVICE_INFO_REFRESH_SECONDS} seconds rather than on every poll.`,
 			type: 'boolean',
 			defaultStyle: {
 				bgcolor: combineRgb(160, 100, 0),

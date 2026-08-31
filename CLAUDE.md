@@ -451,10 +451,48 @@ Run against the 4K60L at 192.168.0.7 in **Quad Multiview + Bypass**, ~10 minutes
 - **The health fields barely move.** Sampled directly every 20 seconds for 7 minutes, `temp`,
   `fan_status`, `sob_alive`, `scaler_alive`, `wall_lock_status` and `usage_time` were all constant;
   `temp` shifted by one degree over two _days_. Only `scaler_alive` differed between captures at all.
-  Polling this at the same 2-second rate as the signal read is therefore mostly wasted requests —
-  **a fraction-of-the-tick refresh for the device-info read is the obvious refinement**, and the
-  measurement above is the justification for it. Deliberately not done yet: the current rate is
-  proven to work, and this is a change that wants its own bench pass.
+  Polling this at the same 2-second rate as the signal read is therefore mostly wasted requests, and
+  that measurement is what the split cadence below is built on.
+
+#### The split cadence (2026-08-31)
+
+The device-info read no longer rides every tick. `deviceInfoEveryTicks()` in `config.ts` derives a
+tick count from the configured interval and `DEVICE_INFO_REFRESH_SECONDS` (30), so at the default
+2-second interval §1.3.1.2 is read every tick and §1.3.1.1 every fifteenth — taking the sustained
+rate from ~1 req/s back to ~0.53. Four properties to preserve:
+
+- **One timer, not two.** The device-info read counts ticks on the signal loop rather than getting
+  a `setInterval` of its own, because two timers can fire together and the module's standing rule is
+  that two cgi-bin requests are never in flight at once. `pollInFlight` only guards one loop.
+- **30 seconds is a target, not a bound.** `deviceInfoEveryTicks()` rounds up, so the period lands
+  at or above the target and overshoots by up to one interval — a 20-second poll interval gives a
+  40-second device-info period, since a read can only ride a tick that exists.
+- **The counter is reset by `refreshDeviceInfo()` itself**, so it counts ticks since the response
+  was last read _by anyone_. A manual "Refresh Firmware Version" postpones the next polled read
+  rather than being followed by one moments later, and the reset lands before the request can fail,
+  which is what stops a unit that refuses §1.3.1.1 from being retried on every tick.
+- **`pollInterval` stays one field.** It is the signal read's interval; the fraction is the module's
+  to derive from its own measurements, not a second number for the user to reason about.
+
+**Bench-tested in a real Companion on 2026-08-31**, against the 4K60L in Quad Multiview + Bypass.
+The risk here was never the device — the 2026-08-26 pass proves the higher rate works and this only
+lowers it — but whether the health variables and feedbacks still update at the slower cadence, or
+quietly freeze. They update.
+
+- **The signal side is unmeasurably changed.** Input variables still follow a re-plug within the
+  configured interval, which is the control for the whole test.
+- **`device_alert_display` tracked the Alert Display action**, averaging ~10s to surface. That is
+  the shape a 30-second period produces: a change at an arbitrary moment lands uniformly across the
+  window, so the mean is what varies with sampling and the _bound_ is the property being checked.
+  This is the test worth repeating, because it is the only health field that can be changed on
+  demand — `temp` moved one degree in two days, so watching it proves nothing either way.
+- **The log shows the derived ratio directly**: 15 signal reads per device read at the default
+  2-second interval, and 2:1 after switching to 20 seconds. The second of those is the overshoot
+  path — 20s does not divide 30s, so the read lands every 40 seconds rather than every 30.
+- **`configUpdated()` rebuilds the cadence**, confirmed by that ratio changing on an interval edit
+  without a reconnect.
+- **Connect-time behaviour is unchanged**: the firmware variables populate immediately, from
+  `checkConnection()` rather than from the loop.
 
 ### Device health variables and feedbacks
 
